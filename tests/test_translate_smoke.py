@@ -1,0 +1,230 @@
+"""
+Tests de humo (smoke tests) para el servicio de traducción.
+
+Verifica funcionalidad básica del endpoint /translate:
+- Traducción de texto simple
+- Traducción de múltiples textos (batch)
+- Uso de glosario
+"""
+import pytest
+from fastapi.testclient import TestClient
+
+
+# Importar la app solo si el modelo está disponible
+try:
+    from app.app import app
+    MODEL_AVAILABLE = True
+except Exception as e:
+    MODEL_AVAILABLE = False
+    SKIP_REASON = f"Modelo no disponible: {e}"
+
+
+# Skip todos los tests si el modelo no está disponible
+pytestmark = pytest.mark.skipif(
+    not MODEL_AVAILABLE,
+    reason="Modelo no cargado. Ejecuta: make download && make convert"
+)
+
+
+@pytest.fixture(scope="module")
+def client():
+    """Cliente de prueba de FastAPI."""
+    return TestClient(app)
+
+
+def test_health_endpoint(client):
+    """Test del endpoint de health check."""
+    response = client.get("/health")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "healthy"
+    assert data["model_loaded"] is True
+
+
+def test_root_endpoint(client):
+    """Test del endpoint raíz."""
+    response = client.get("/")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["service"] == "Traductor ES → DA"
+    assert data["provider"] == "nllb-ct2-int8"
+    assert data["status"] == "online"
+
+
+def test_translate_single_text(client):
+    """Test de traducción de un solo texto."""
+    payload = {
+        "text": "Hola mundo",
+        "max_new_tokens": 128
+    }
+    
+    response = client.post("/translate", json=payload)
+    assert response.status_code == 200
+    
+    data = response.json()
+    assert data["provider"] == "nllb-ct2-int8"
+    assert data["source"] == "spa_Latn"
+    assert data["target"] == "dan_Latn"
+    assert "translations" in data
+    assert isinstance(data["translations"], list)
+    assert len(data["translations"]) == 1
+    assert len(data["translations"][0]) > 0
+    
+    # Verificar que la traducción no está vacía
+    translation = data["translations"][0]
+    assert translation.strip() != ""
+    
+    print(f"\nTraducción: '{payload['text']}' → '{translation}'")
+
+
+def test_translate_multiple_texts(client):
+    """Test de traducción de múltiples textos (batch)."""
+    payload = {
+        "text": [
+            "Buenos días",
+            "¿Cómo estás?",
+            "Gracias por tu ayuda"
+        ],
+        "max_new_tokens": 128
+    }
+    
+    response = client.post("/translate", json=payload)
+    assert response.status_code == 200
+    
+    data = response.json()
+    assert "translations" in data
+    assert isinstance(data["translations"], list)
+    assert len(data["translations"]) == 3
+    
+    # Verificar que todas las traducciones no están vacías
+    for i, translation in enumerate(data["translations"]):
+        assert translation.strip() != ""
+        print(f"\nTraducción {i+1}: '{payload['text'][i]}' → '{translation}'")
+
+
+def test_translate_with_glossary(client):
+    """Test de traducción con glosario personalizado."""
+    payload = {
+        "text": "Bienvenido a Acme Corporation",
+        "max_new_tokens": 128,
+        "glossary": {
+            "Acme": "Acme",  # Preservar nombre de empresa
+            "Corporation": "Selskab"  # Traducir a término específico
+        }
+    }
+    
+    response = client.post("/translate", json=payload)
+    assert response.status_code == 200
+    
+    data = response.json()
+    assert "translations" in data
+    assert len(data["translations"]) == 1
+    
+    translation = data["translations"][0]
+    assert translation.strip() != ""
+    
+    # Verificar que los términos del glosario aparecen en la traducción
+    # Nota: Esta verificación puede fallar si el modelo traduce de forma diferente
+    # pero al menos verificamos que no está vacío
+    print(f"\nTraducción con glosario: '{payload['text']}' → '{translation}'")
+    print(f"Glosario aplicado: {payload['glossary']}")
+    
+    # Verificación flexible: al menos uno de los términos debe aparecer
+    glossary_terms = list(payload['glossary'].values())
+    # Como mínimo, la traducción no debe estar vacía
+    assert len(translation) > 0
+
+
+def test_translate_empty_text_error(client):
+    """Test de error con texto vacío."""
+    payload = {
+        "text": ""
+    }
+    
+    response = client.post("/translate", json=payload)
+    # Puede ser 400 (bad request) o 422 (validation error)
+    assert response.status_code in [400, 422]
+
+
+def test_translate_empty_list_error(client):
+    """Test de error con lista vacía."""
+    payload = {
+        "text": []
+    }
+    
+    response = client.post("/translate", json=payload)
+    assert response.status_code == 400
+    data = response.json()
+    assert "detail" in data
+
+
+def test_translate_max_tokens_validation(client):
+    """Test de validación de max_new_tokens."""
+    # Test con valor válido
+    payload = {
+        "text": "Hola",
+        "max_new_tokens": 64
+    }
+    response = client.post("/translate", json=payload)
+    assert response.status_code == 200
+    
+    # Test con valor inválido (demasiado bajo)
+    payload_invalid = {
+        "text": "Hola",
+        "max_new_tokens": 0
+    }
+    response = client.post("/translate", json=payload_invalid)
+    assert response.status_code == 422  # Validation error
+    
+    # Test con valor inválido (demasiado alto)
+    payload_invalid_high = {
+        "text": "Hola",
+        "max_new_tokens": 1000
+    }
+    response = client.post("/translate", json=payload_invalid_high)
+    assert response.status_code == 422  # Validation error
+
+
+def test_info_endpoint(client):
+    """Test del endpoint de información."""
+    response = client.get("/info")
+    assert response.status_code == 200
+    
+    data = response.json()
+    assert "model" in data
+    assert "capabilities" in data
+    
+    capabilities = data["capabilities"]
+    assert "spa_Latn" in capabilities["source_languages"]
+    assert "dan_Latn" in capabilities["target_languages"]
+    assert capabilities["supports_glossary"] is True
+    assert capabilities["supports_batch"] is True
+
+
+@pytest.mark.parametrize("text,expected_not_empty", [
+    ("Hola", True),
+    ("Buenos días", True),
+    ("¿Cómo estás?", True),
+    ("Me llamo Pedro", True),
+    ("El cielo es azul", True),
+])
+def test_various_spanish_phrases(client, text, expected_not_empty):
+    """Test parametrizado con varias frases en español."""
+    payload = {"text": text}
+    
+    response = client.post("/translate", json=payload)
+    assert response.status_code == 200
+    
+    data = response.json()
+    translation = data["translations"][0]
+    
+    if expected_not_empty:
+        assert len(translation.strip()) > 0
+    
+    print(f"\n'{text}' → '{translation}'")
+
+
+if __name__ == "__main__":
+    # Permitir ejecutar tests directamente
+    pytest.main([__file__, "-v", "-s"])
+

@@ -1,0 +1,11 @@
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+transformers==4.37.0
+sentencepiece==0.1.99
+ctranslate2==4.0.0
+huggingface_hub==0.20.2
+pydantic==2.5.3
+pytest==7.4.4
+httpx==0.26.0
+python-dotenv==1.0.0
+
