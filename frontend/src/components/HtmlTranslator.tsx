@@ -64,6 +64,23 @@ export function HtmlTranslator() {
             HTML {direction === 'es-da' ? '🇪🇸 Español' : '🇩🇰 Danés'}
           </Label>
           <div className="flex items-center gap-4">
+            {/* Control de Max Tokens */}
+            <div className="flex items-center gap-2">
+              <Label htmlFor="max-tokens-html" className="text-sm">
+                Max tokens:
+              </Label>
+              <input
+                id="max-tokens-html"
+                type="number"
+                min={32}
+                max={512}
+                step={16}
+                value={useAppStore((s) => s.maxNewTokens)}
+                onChange={(e) => useAppStore.getState().setMaxNewTokens(parseInt(e.target.value || '256', 10))}
+                className="w-20 rounded-md border border-input bg-background px-2 py-1 text-sm"
+              />
+            </div>
+            
             {direction === 'es-da' && (
               <div className="flex items-center gap-2">
                 <Switch

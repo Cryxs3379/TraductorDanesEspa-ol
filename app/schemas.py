@@ -21,7 +21,7 @@ class TranslateRequest(BaseModel):
         description="Texto o lista de textos en español a traducir"
     )
     max_new_tokens: int = Field(
-        default=192,
+        default=256,
         ge=32,
         le=512,
         description="Número máximo de tokens a generar por traducción"
@@ -119,7 +119,7 @@ class TranslateHTMLRequest(BaseModel):
         description="Contenido HTML del correo electrónico a traducir"
     )
     max_new_tokens: int = Field(
-        default=192,
+        default=256,
         ge=32,
         le=512,
         description="Número máximo de tokens a generar por bloque"

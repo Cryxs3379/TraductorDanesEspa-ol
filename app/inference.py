@@ -23,6 +23,34 @@ logger = logging.getLogger(__name__)
 # Nota: load_model() ahora está en ModelManager (app/startup.py)
 
 
+def _derive_max_new_tokens(input_lengths: List[int]) -> int:
+    """
+    Calcula max_new_tokens adaptativo basado en la longitud de entrada.
+    
+    Heurística: salida ~ 1.2x del input más largo; límite 512 según schema.
+    
+    Args:
+        input_lengths: Lista de longitudes de input_ids
+        
+    Returns:
+        max_new_tokens recomendado (entre 128 y 512)
+        
+    Examples:
+        >>> _derive_max_new_tokens([50, 100])
+        128
+        >>> _derive_max_new_tokens([400, 500])
+        512
+    """
+    if not input_lengths:
+        return settings.MAX_NEW_TOKENS
+    
+    max_input_len = max(input_lengths)
+    estimated = int(max_input_len * 1.2)
+    
+    # Clamp entre 128 y 512 (límite del schema Pydantic)
+    return max(128, min(512, estimated))
+
+
 def translate_batch(
     texts: List[str],
     direction: str = "es-da",
@@ -144,6 +172,14 @@ def translate_batch(
         
         # input_ids ya es una lista de listas (sin tensores)
         input_ids_list = encoded["input_ids"]
+        
+        # Calcular max_new_tokens adaptativo si no fue especificado por el cliente
+        if max_new_tokens == settings.MAX_NEW_TOKENS:
+            # Cliente no especificó; derivar basado en longitud de entrada
+            input_lengths = [len(ids) for ids in input_ids_list]
+            derived_max_new_tokens = _derive_max_new_tokens(input_lengths)
+            logger.debug(f"max_new_tokens adaptativo: {max_new_tokens} → {derived_max_new_tokens}")
+            max_new_tokens = derived_max_new_tokens
         
         # Convertir IDs a tokens para CTranslate2
         source_tokens = [

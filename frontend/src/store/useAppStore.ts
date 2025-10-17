@@ -6,7 +6,7 @@ interface AppState {
   apiUrl: string
   direction: Direction
   formal: boolean
-  maxNewTokens: number
+  maxNewTokens: number  // 32-512, default 256
   glossaryText: string
 
   // UI
@@ -48,7 +48,7 @@ const defaultState = {
   apiUrl: 'http://localhost:8000',
   direction: 'es-da' as Direction,
   formal: false,
-  maxNewTokens: 192,
+  maxNewTokens: 256,  // actualizado de 192 para textos largos
   glossaryText: '',
   activeTab: 'text' as TranslationMode,
   isTranslating: false,

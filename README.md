@@ -6,6 +6,20 @@ Sistema de traducción automática de español a danés optimizado para correos 
 
 🔒 **100% privado** • 🚫 **Sin conexión a Internet** • 💻 **Funciona completamente offline**
 
+
+para arrancar el servicio, el back se arranca
+# Navega a tu carpeta (copia y pega exactamente esto)
+cd C:\Users\PTRUJILLO\Desktop\Trujillo\TraductorDanesEspañol
+
+# Activa el entorno virtual
+.\venv\Scripts\activate
+
+# Lanza el servidor
+python start_server.py
+
+para arrancar el front 
+
+cd .\frontend\ npm run dev
 ---
 
 ## 📋 Tabla de Contenidos

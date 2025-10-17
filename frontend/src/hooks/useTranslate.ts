@@ -28,6 +28,8 @@ export function useTranslate(mode: TranslationMode) {
     setLastSuccess(null)
     setLastLatencyMs(null)
 
+    const startTime = performance.now()
+
     try {
       const glossary = parseGlossary(glossaryText)
 
@@ -64,7 +66,8 @@ export function useTranslate(mode: TranslationMode) {
         setLastLatencyMs(response.latencyMs)
       }
 
-      setLastSuccess(`✓ Traducción completada en ${Math.round(performance.now() - performance.now())}ms`)
+      const totalTime = Math.round(performance.now() - startTime)
+      setLastSuccess(`✓ Traducción completada en ${totalTime}ms`)
       return result
     } catch (error) {
       const apiError = error as ApiError

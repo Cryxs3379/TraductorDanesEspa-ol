@@ -20,8 +20,12 @@ class Settings:
     CT2_INTER_THREADS: int = int(os.getenv("CT2_INTER_THREADS", "4"))
     CT2_INTRA_THREADS: int = int(os.getenv("CT2_INTRA_THREADS", "4"))
     BEAM_SIZE: int = int(os.getenv("BEAM_SIZE", "3"))
-    MAX_NEW_TOKENS: int = int(os.getenv("MAX_NEW_TOKENS", "192"))
-    MAX_INPUT_TOKENS: int = int(os.getenv("MAX_INPUT_TOKENS", "384"))
+    MAX_NEW_TOKENS: int = int(os.getenv("MAX_NEW_TOKENS", "256"))      # subido para textos largos
+    MAX_INPUT_TOKENS: int = int(os.getenv("MAX_INPUT_TOKENS", "1024"))  # subido de 384 para evitar truncado
+    
+    # Segmentación automática (cuando entrada > 90% del límite)
+    AUTO_SEGMENT_THRESHOLD: float = 0.9
+    MAX_SEGMENT_CHARS: int = int(os.getenv("MAX_SEGMENT_CHARS", "1200"))
     
     # Servidor
     HOST: str = os.getenv("HOST", "0.0.0.0")

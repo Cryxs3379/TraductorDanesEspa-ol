@@ -249,12 +249,15 @@ async def translate(request: TranslateRequest):
                 detail="El campo 'text' no puede estar vacío"
             )
         
-        # Segmentar textos largos (emails)
+        # Segmentar textos largos automáticamente
+        # Usar max_segment_chars más grande para evitar truncado
         all_segments = []
         segment_map = []  # Para reconstruir después
         
         for idx, text in enumerate(texts_to_translate):
-            segments = split_text_for_email(text, max_segment_chars=600)
+            # Usar max_segment_chars mayor (800) para reducir número de segmentos
+            # y evitar traducciones cortadas
+            segments = split_text_for_email(text, max_segment_chars=settings.MAX_SEGMENT_CHARS)
             for seg in segments:
                 all_segments.append(seg)
                 segment_map.append(idx)
