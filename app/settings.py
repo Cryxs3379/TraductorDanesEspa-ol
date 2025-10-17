@@ -21,6 +21,7 @@ class Settings:
     CT2_INTRA_THREADS: int = int(os.getenv("CT2_INTRA_THREADS", "4"))
     BEAM_SIZE: int = int(os.getenv("BEAM_SIZE", "3"))
     MAX_NEW_TOKENS: int = int(os.getenv("MAX_NEW_TOKENS", "192"))
+    MAX_INPUT_TOKENS: int = int(os.getenv("MAX_INPUT_TOKENS", "384"))
     
     # Servidor
     HOST: str = os.getenv("HOST", "0.0.0.0")
@@ -32,6 +33,9 @@ class Settings:
     
     # Privacidad
     LOG_TRANSLATIONS: bool = os.getenv("LOG_TRANSLATIONS", "false").lower() == "true"
+    
+    # Post-procesado danés
+    FORMAL_DA: bool = os.getenv("FORMAL_DA", "false").lower() == "true"
     
     # Límites
     MAX_BATCH_SIZE: int = int(os.getenv("MAX_BATCH_SIZE", "16"))

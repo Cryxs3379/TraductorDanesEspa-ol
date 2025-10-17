@@ -22,7 +22,28 @@ from app.schemas import (
 )
 from app.inference import translate_batch
 from app.glossary import apply_glossary_pre, apply_glossary_post
-from app.email_html import translate_html, sanitize_html
+from app.segment import split_text_for_email, split_html_preserving_structure, rehydrate_html
+from app.cache import translation_cache
+
+
+def sanitize_html(html: str) -> str:
+    """
+    Sanitiza HTML removiendo scripts y event handlers peligrosos.
+    
+    Args:
+        html: HTML a sanitizar
+        
+    Returns:
+        HTML limpio
+    """
+    import re
+    # Remover scripts
+    html = re.sub(r'<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>', '', html, flags=re.IGNORECASE)
+    # Remover event handlers
+    html = re.sub(r'\s*on\w+\s*=\s*["\']?[^"\']*["\']?', '', html, flags=re.IGNORECASE)
+    # Remover javascript: en hrefs
+    html = re.sub(r'href\s*=\s*["\']?\s*javascript:', 'href="#', html, flags=re.IGNORECASE)
+    return html
 
 
 # Configuración de logging
@@ -217,43 +238,71 @@ async def translate(request: TranslateRequest):
     
     try:
         # Normalizar input: siempre trabajar con lista
+        is_single_text = isinstance(request.text, str)
         texts_to_translate = (
-            [request.text] if isinstance(request.text, str) else request.text
+            [request.text] if is_single_text else request.text
         )
         
-        if not texts_to_translate:
+        if not texts_to_translate or all(not t.strip() for t in texts_to_translate):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="El campo 'text' no puede estar vacío"
             )
         
+        # Segmentar textos largos (emails)
+        all_segments = []
+        segment_map = []  # Para reconstruir después
+        
+        for idx, text in enumerate(texts_to_translate):
+            segments = split_text_for_email(text, max_segment_chars=600)
+            for seg in segments:
+                all_segments.append(seg)
+                segment_map.append(idx)
+        
         # Aplicar glosario pre-traducción si existe
         if request.glossary:
             if not settings.LOG_TRANSLATIONS:
                 logger.info(f"Aplicando glosario con {len(request.glossary)} términos")
-            texts_to_translate = [
-                apply_glossary_pre(text, request.glossary)
-                for text in texts_to_translate
+            all_segments = [
+                apply_glossary_pre(seg, request.glossary)
+                for seg in all_segments
             ]
         
-        # Traducir
+        # Traducir con caché
         if not settings.LOG_TRANSLATIONS:
-            logger.info(f"Traduciendo {len(texts_to_translate)} texto(s)...")
+            logger.info(f"Traduciendo {len(all_segments)} segmento(s)...")
         
-        translations = translate_batch(
-            texts_to_translate,
-            max_new_tokens=request.max_new_tokens
+        segment_translations = translate_batch(
+            all_segments,
+            max_new_tokens=request.max_new_tokens,
+            use_cache=True,
+            formal=request.formal or settings.FORMAL_DA
         )
         
         # Aplicar glosario post-traducción si existe
         if request.glossary:
-            translations = [
-                apply_glossary_post(text, request.glossary)
-                for text in translations
+            segment_translations = [
+                apply_glossary_post(seg, request.glossary)
+                for seg in segment_translations
             ]
         
+        # Reensamblar segmentos por texto original
+        translations = []
+        for original_idx in range(len(texts_to_translate)):
+            # Encontrar todos los segmentos de este texto
+            segs_for_this_text = [
+                segment_translations[i] 
+                for i, seg_idx in enumerate(segment_map) 
+                if seg_idx == original_idx
+            ]
+            # Unir con doble espacio
+            translations.append(' '.join(segs_for_this_text))
+        
         if not settings.LOG_TRANSLATIONS:
-            logger.info(f"✓ Traducción completada exitosamente")
+            logger.info(f"✓ Traducción completada ({len(texts_to_translate)} textos, {len(all_segments)} segmentos)")
+            # Log de estadísticas de caché
+            stats = translation_cache.stats()
+            logger.info(f"  Caché: {stats['hit_rate']} hit rate ({stats['hits']} hits, {stats['misses']} misses)")
         
         # Construir respuesta
         response = TranslateResponse(
@@ -326,31 +375,47 @@ async def translate_html_endpoint(request: TranslateHTMLRequest):
         if not settings.LOG_TRANSLATIONS:
             logger.info(f"Traduciendo HTML ({len(html_clean)} caracteres)...")
         
-        # Función de traducción wrapper que aplica glosario
-        def translate_with_glossary(texts: list[str]) -> list[str]:
-            # Pre-procesamiento con glosario
-            if request.glossary:
-                texts = [apply_glossary_pre(t, request.glossary) for t in texts]
-            
-            # Traducir
-            translations = translate_batch(texts, max_new_tokens=request.max_new_tokens)
-            
-            # Post-procesamiento con glosario
-            if request.glossary:
-                translations = [apply_glossary_post(t, request.glossary) for t in translations]
-            
-            return translations
+        # Extraer bloques HTML y textos
+        blocks, texts_to_translate = split_html_preserving_structure(html_clean)
         
-        # Traducir HTML
-        html_translated = translate_html(
-            html_clean,
-            translate_fn=translate_with_glossary,
-            glossary=request.glossary,
-            max_new_tokens=request.max_new_tokens
+        if not texts_to_translate:
+            # HTML sin texto traducible
+            return TranslateHTMLResponse(
+                provider="nllb-ct2-int8",
+                source="spa_Latn",
+                target="dan_Latn",
+                html=html_clean
+            )
+        
+        # Aplicar glosario pre-traducción si existe
+        if request.glossary:
+            texts_to_translate = [
+                apply_glossary_pre(t, request.glossary)
+                for t in texts_to_translate
+            ]
+        
+        # Traducir con caché y post-procesado
+        translated_texts = translate_batch(
+            texts_to_translate,
+            max_new_tokens=request.max_new_tokens,
+            use_cache=True,
+            formal=request.formal or settings.FORMAL_DA
         )
         
+        # Aplicar glosario post-traducción si existe
+        if request.glossary:
+            translated_texts = [
+                apply_glossary_post(t, request.glossary)
+                for t in translated_texts
+            ]
+        
+        # Reconstruir HTML
+        html_translated = rehydrate_html(blocks, translated_texts)
+        
         if not settings.LOG_TRANSLATIONS:
-            logger.info("✓ HTML traducido exitosamente")
+            logger.info(f"✓ HTML traducido ({len(texts_to_translate)} bloques)")
+            stats = translation_cache.stats()
+            logger.info(f"  Caché: {stats['hit_rate']} hit rate")
         
         # Construir respuesta
         response = TranslateHTMLResponse(
@@ -376,6 +441,7 @@ async def translate_html_endpoint(request: TranslateHTMLRequest):
 async def info():
     """Devuelve información detallada del modelo cargado."""
     health_info = model_manager.health()
+    cache_stats = translation_cache.stats()
     
     return {
         "model": {
@@ -390,9 +456,25 @@ async def info():
             "supports_glossary": True,
             "supports_batch": True,
             "supports_html": True,
+            "supports_cache": True,
+            "supports_segmentation": True,
+            "supports_formal_style": True,
             "max_batch_size": settings.MAX_BATCH_SIZE,
             "max_tokens_per_translation": 512
-        }
+        },
+        "cache": cache_stats
+    }
+
+
+@app.post("/cache/clear")
+async def clear_cache():
+    """Limpia el caché de traducciones."""
+    stats_before = translation_cache.stats()
+    translation_cache.clear()
+    
+    return {
+        "message": "Caché limpiado exitosamente",
+        "entries_cleared": stats_before["size"]
     }
 
 

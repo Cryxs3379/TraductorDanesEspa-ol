@@ -11,22 +11,32 @@ class TranslateRequest(BaseModel):
     
     Attributes:
         text: Texto o lista de textos a traducir
-        max_new_tokens: Número máximo de tokens a generar (default: 256)
+        max_new_tokens: Número máximo de tokens a generar (default: 192)
         glossary: Diccionario opcional de términos ES -> DA para preservar/reemplazar
+        case_insensitive: Aplicar glosario sin considerar mayúsculas/minúsculas
+        formal: Aplicar estilo formal danés (saludos, cierres, tratamiento de usted)
     """
     text: Union[str, list[str]] = Field(
         ...,
         description="Texto o lista de textos en español a traducir"
     )
     max_new_tokens: int = Field(
-        default=256,
-        ge=1,
+        default=192,
+        ge=32,
         le=512,
         description="Número máximo de tokens a generar por traducción"
     )
     glossary: Optional[dict[str, str]] = Field(
         default=None,
         description="Glosario opcional: términos español -> danés"
+    )
+    case_insensitive: bool = Field(
+        default=False,
+        description="Aplicar glosario sin distinguir mayúsculas/minúsculas"
+    )
+    formal: bool = Field(
+        default=False,
+        description="Aplicar estilo formal danés (De/Dem en lugar de du/dig)"
     )
 
     class Config:
@@ -86,22 +96,32 @@ class TranslateHTMLRequest(BaseModel):
     
     Attributes:
         html: Contenido HTML a traducir (correos electrónicos)
-        max_new_tokens: Número máximo de tokens a generar (default: 256)
+        max_new_tokens: Número máximo de tokens a generar (default: 192)
         glossary: Diccionario opcional de términos ES -> DA
+        case_insensitive: Aplicar glosario sin considerar mayúsculas/minúsculas
+        formal: Aplicar estilo formal danés
     """
     html: str = Field(
         ...,
         description="Contenido HTML del correo electrónico a traducir"
     )
     max_new_tokens: int = Field(
-        default=256,
-        ge=1,
+        default=192,
+        ge=32,
         le=512,
         description="Número máximo de tokens a generar por bloque"
     )
     glossary: Optional[dict[str, str]] = Field(
         default=None,
         description="Glosario opcional: términos español -> danés"
+    )
+    case_insensitive: bool = Field(
+        default=False,
+        description="Aplicar glosario sin distinguir mayúsculas/minúsculas"
+    )
+    formal: bool = Field(
+        default=False,
+        description="Aplicar estilo formal danés"
     )
 
     class Config:

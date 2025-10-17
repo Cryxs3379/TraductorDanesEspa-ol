@@ -106,7 +106,6 @@ def test_translate_with_glossary(client):
     """Test de traducción con glosario personalizado."""
     payload = {
         "text": "Bienvenido a Acme Corporation",
-        "max_new_tokens": 128,
         "glossary": {
             "Acme": "Acme",  # Preservar nombre de empresa
             "Corporation": "Selskab"  # Traducir a término específico
@@ -123,16 +122,31 @@ def test_translate_with_glossary(client):
     translation = data["translations"][0]
     assert translation.strip() != ""
     
-    # Verificar que los términos del glosario aparecen en la traducción
-    # Nota: Esta verificación puede fallar si el modelo traduce de forma diferente
-    # pero al menos verificamos que no está vacío
+    # Verificar que los términos del glosario aparecen
+    assert "Acme" in translation
+    assert "Selskab" in translation or "Corporation" in translation
+    
     print(f"\nTraducción con glosario: '{payload['text']}' → '{translation}'")
     print(f"Glosario aplicado: {payload['glossary']}")
+
+
+def test_translate_with_formal_style(client):
+    """Test de traducción con estilo formal."""
+    payload = {
+        "text": "Hola, necesito ayuda",
+        "formal": True
+    }
     
-    # Verificación flexible: al menos uno de los términos debe aparecer
-    glossary_terms = list(payload['glossary'].values())
-    # Como mínimo, la traducción no debe estar vacía
-    assert len(translation) > 0
+    response = client.post("/translate", json=payload)
+    assert response.status_code == 200
+    
+    data = response.json()
+    translation = data["translations"][0]
+    
+    # Debe procesar sin errores
+    assert len(translation.strip()) > 0
+    
+    print(f"\nTraducción formal: '{payload['text']}' → '{translation}'")
 
 
 def test_translate_empty_text_error(client):
