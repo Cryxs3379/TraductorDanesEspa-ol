@@ -3,10 +3,15 @@ Motor de inferencia usando CTranslate2 para traducción NLLB.
 
 Carga el modelo convertido a CT2 con cuantización INT8 y el tokenizador HuggingFace.
 Proporciona funciones de traducción batch con configuración optimizada.
+
+Garantiza traducción determinística ES→DA forzando idioma destino.
 """
 import os
+import re
 import logging
 from typing import List, Optional
+from functools import lru_cache
+import hashlib
 
 import ctranslate2 as ct
 from transformers import AutoTokenizer
@@ -27,6 +32,7 @@ MODEL_DIR = os.getenv("MODEL_DIR", "./models/nllb-600m")
 CT2_DIR = os.getenv("CT2_DIR", "./models/nllb-600m-ct2-int8")
 CT2_INTER_THREADS = int(os.getenv("CT2_INTER_THREADS", "0"))
 CT2_INTRA_THREADS = int(os.getenv("CT2_INTRA_THREADS", "0"))
+BEAM_SIZE = int(os.getenv("BEAM_SIZE", "4"))
 
 # Idiomas FLORES-200
 SOURCE_LANG = "spa_Latn"
@@ -74,6 +80,13 @@ def load_model():
         
         # Cargar tokenizador HuggingFace
         tokenizer = AutoTokenizer.from_pretrained(MODEL_DIR)
+        
+        # CRÍTICO: Forzar idioma source para NLLB
+        # Esto garantiza que el tokenizador añada el token correcto de español al inicio
+        if hasattr(tokenizer, 'src_lang'):
+            tokenizer.src_lang = SOURCE_LANG
+            logger.info(f"✓ Idioma source configurado: {SOURCE_LANG}")
+        
         logger.info("✓ Tokenizador HuggingFace cargado")
         
         # Obtener token de idioma destino para NLLB
@@ -84,14 +97,16 @@ def load_model():
                 logger.info(f"✓ Token de idioma destino: {target_lang_token} (ID: {target_lang_id})")
             else:
                 logger.warning(f"No se encontró ID para idioma {TARGET_LANG}")
+                raise ValueError(f"No se pudo obtener token para {TARGET_LANG}")
         else:
             logger.warning("El tokenizador no tiene lang_code_to_id")
+            raise ValueError("El tokenizador no soporta NLLB lang_code_to_id")
         
         # Warmup: traducción de prueba
         logger.info("Ejecutando warmup...")
         try:
-            warmup_text = ["Hola"]
-            _ = translate_batch(warmup_text, max_new_tokens=10)
+            warmup_text = ["Hola mundo"]
+            _ = translate_batch(warmup_text, max_new_tokens=20)
             logger.info("✓ Warmup completado - Sistema listo")
         except Exception as e:
             logger.warning(f"Warmup falló, pero el modelo está cargado: {e}")
@@ -105,15 +120,18 @@ def load_model():
 def translate_batch(
     texts: List[str],
     max_new_tokens: int = 256,
-    beam_size: int = 4
+    beam_size: int = None
 ) -> List[str]:
     """
     Traduce un batch de textos de español a danés.
     
+    Garantiza que la salida sea en alfabeto latino (danés).
+    Si detecta caracteres no latinos, reintenta con beam_size mayor.
+    
     Args:
         texts: Lista de textos en español
         max_new_tokens: Máximo número de tokens a generar
-        beam_size: Tamaño del beam search
+        beam_size: Tamaño del beam search (default: usa BEAM_SIZE de env)
         
     Returns:
         Lista de traducciones en danés
@@ -132,12 +150,19 @@ def translate_batch(
     if not texts:
         return []
     
+    # Usar beam_size por defecto de env si no se especifica
+    if beam_size is None:
+        beam_size = BEAM_SIZE
+    
     try:
+        # Pre-procesar textos: normalizar espacios
+        texts_normalized = [_normalize_text(text) for text in texts]
+        
         # Tokenizar textos de entrada
         # NLLB espera source language token al inicio
-        # El tokenizador ya añade este token automáticamente
+        # El tokenizador ya añade este token automáticamente si src_lang está configurado
         encoded = tokenizer(
-            texts,
+            texts_normalized,
             return_tensors="pt",
             padding=True,
             truncation=True,
@@ -156,6 +181,8 @@ def translate_batch(
         if target_lang_token:
             # Cada elemento del batch necesita el mismo prefix
             target_prefix = [[target_lang_token]] * len(texts)
+        else:
+            raise RuntimeError("Token de idioma destino no configurado")
         
         # Traducir con CTranslate2
         results = translator.translate_batch(
@@ -163,7 +190,8 @@ def translate_batch(
             target_prefix=target_prefix,
             beam_size=beam_size,
             max_decoding_length=max_new_tokens,
-            return_scores=False
+            return_scores=False,
+            repetition_penalty=1.2  # Evitar repeticiones
         )
         
         # Extraer hipótesis (primera de cada beam)
@@ -171,7 +199,7 @@ def translate_batch(
         
         # Convertir tokens a texto
         translations = []
-        for tokens in hypotheses:
+        for i, tokens in enumerate(hypotheses):
             # Convertir tokens a IDs
             token_ids = tokenizer.convert_tokens_to_ids(tokens)
             
@@ -182,13 +210,106 @@ def translate_batch(
                 clean_up_tokenization_spaces=True
             )
             
+            # Post-procesamiento: limpiar artefactos
+            text = _clean_translation(text)
+            
+            # Validación: verificar que la salida es alfabeto latino
+            if not _validate_latin_output(text):
+                logger.warning(
+                    f"Salida con caracteres no latinos detectada (texto {i+1}). "
+                    f"Reintentando con beam_size={beam_size + 1}..."
+                )
+                # Reintentar este texto específico con beam_size mayor
+                if beam_size < 8:  # Límite de reintentos
+                    retry_result = translate_batch(
+                        [texts[i]], 
+                        max_new_tokens=max_new_tokens, 
+                        beam_size=beam_size + 1
+                    )
+                    text = retry_result[0]
+                else:
+                    logger.error(
+                        f"No se pudo obtener salida en alfabeto latino después de varios intentos. "
+                        f"Texto: {texts[i][:50]}..."
+                    )
+            
             translations.append(text)
         
         return translations
         
     except Exception as e:
-        logger.error(f"Error en traducción: {e}")
+        logger.error(f"Error en traducción: {e}", exc_info=True)
         raise Exception(f"Error al traducir: {str(e)}")
+
+
+def _normalize_text(text: str) -> str:
+    """
+    Normaliza el texto de entrada: espacios, saltos de línea, etc.
+    
+    Preserva URLs, emails y números.
+    """
+    # Normalizar espacios múltiples
+    text = re.sub(r'\s+', ' ', text)
+    # Eliminar espacios al inicio y final
+    text = text.strip()
+    return text
+
+
+def _clean_translation(text: str) -> str:
+    """
+    Limpia artefactos en la traducción generada.
+    
+    - Elimina tokens de idioma visibles si aparecen (ej: "dan_Latn")
+    - Normaliza espacios
+    """
+    # Eliminar posibles tokens de idioma que se hayan colado
+    text = re.sub(r'\b(dan_Latn|spa_Latn)\b', '', text)
+    
+    # Eliminar marcadores residuales BOS/EOS si aparecen como texto
+    text = re.sub(r'<\|.*?\|>', '', text)
+    
+    # Normalizar espacios múltiples resultantes
+    text = re.sub(r'\s+', ' ', text)
+    text = text.strip()
+    
+    return text
+
+
+def _validate_latin_output(text: str) -> bool:
+    """
+    Valida que la salida contenga principalmente caracteres del alfabeto latino.
+    
+    Permite letras latinas (incluyendo danesas: æ, ø, å), números, 
+    puntuación común y algunos símbolos.
+    
+    Returns:
+        True si >80% son caracteres latinos válidos, False en caso contrario
+    """
+    if not text:
+        return True
+    
+    # Caracteres permitidos: latinos, daneses, números, puntuación, espacios
+    # Incluye: a-z, A-Z, æøåÆØÅ, números, puntuación común, espacios
+    latin_pattern = re.compile(r'[a-zA-ZæøåÆØÅàáâãäåèéêëìíîïòóôõöùúûüýÿñçÀÁÂÃÄÅÈÉÊËÌÍÎÏÒÓÔÕÖÙÚÛÜÝŸÑÇ0-9\s\.,;:!?¿¡\-\'\"()\[\]{}/@#$%&*+=<>|\\~`]')
+    
+    # Contar caracteres latinos vs total
+    latin_chars = len(latin_pattern.findall(text))
+    total_chars = len(text)
+    
+    if total_chars == 0:
+        return True
+    
+    ratio = latin_chars / total_chars
+    
+    # Si más del 20% son caracteres no latinos, considerar inválido
+    if ratio < 0.8:
+        logger.warning(
+            f"Texto con baja proporción de caracteres latinos: {ratio:.2%}. "
+            f"Muestra: {text[:100]}"
+        )
+        return False
+    
+    return True
 
 
 def get_model_info() -> dict:
@@ -205,6 +326,7 @@ def get_model_info() -> dict:
         "target_lang": TARGET_LANG,
         "loaded": translator is not None and tokenizer is not None,
         "inter_threads": CT2_INTER_THREADS,
-        "intra_threads": CT2_INTRA_THREADS
+        "intra_threads": CT2_INTRA_THREADS,
+        "beam_size": BEAM_SIZE
     }
 

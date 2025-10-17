@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Traductor ES → DA | Correos Corporativos</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <h1>📧 Traductor Español → Danés</h1>
+            <p class="subtitle">Para correos corporativos • 100% local y privado</p>
+            <div class="status-indicator" id="statusIndicator">
+                <span class="status-dot"></span>
+                <span class="status-text">Verificando conexión...</span>
+            </div>
+        </header>
+
+        <!-- Tabs -->
+        <div class="tabs">
+            <button class="tab-button active" data-tab="text">
+                📝 Texto
+            </button>
+            <button class="tab-button" data-tab="html">
+                🌐 HTML (correo)
+            </button>
+        </div>
+
+        <!-- Tab: Texto -->
+        <div class="tab-content active" id="textTab">
+            <div class="translation-workspace">
+                <div class="column">
+                    <div class="column-header">
+                        <h3>🇪🇸 Español</h3>
+                        <div class="file-actions">
+                            <label for="fileInputText" class="btn-file">
+                                📁 Cargar archivo
+                            </label>
+                            <input type="file" id="fileInputText" accept=".txt" hidden>
+                        </div>
+                    </div>
+                    <textarea 
+                        id="sourceText" 
+                        class="text-area" 
+                        placeholder="Escribe o pega tu texto en español aquí...&#10;&#10;Puedes cargar archivos .txt usando el botón de arriba."
+                        spellcheck="true"
+                        lang="es"
+                    ></textarea>
+                    <div class="text-info">
+                        <span id="sourceCharCount">0 caracteres</span>
+                    </div>
+                </div>
+
+                <div class="column">
+                    <div class="column-header">
+                        <h3>🇩🇰 Danés</h3>
+                        <div class="actions">
+                            <button id="copyText" class="btn-action" disabled title="Copiar al portapapeles">
+                                📋 Copiar
+                            </button>
+                            <button id="saveText" class="btn-action" disabled title="Guardar como archivo">
+                                💾 Guardar
+                            </button>
+                        </div>
+                    </div>
+                    <textarea 
+                        id="targetText" 
+                        class="text-area" 
+                        placeholder="La traducción aparecerá aquí..."
+                        readonly
+                        lang="da"
+                    ></textarea>
+                    <div class="text-info">
+                        <span id="targetCharCount">0 caracteres</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab: HTML -->
+        <div class="tab-content" id="htmlTab">
+            <div class="translation-workspace">
+                <div class="column">
+                    <div class="column-header">
+                        <h3>🇪🇸 HTML Español</h3>
+                        <div class="file-actions">
+                            <label for="fileInputHtml" class="btn-file">
+                                📁 Cargar archivo
+                            </label>
+                            <input type="file" id="fileInputHtml" accept=".html,.htm" hidden>
+                        </div>
+                    </div>
+                    <textarea 
+                        id="sourceHtml" 
+                        class="text-area code" 
+                        placeholder="Pega el código HTML de tu correo aquí...&#10;&#10;Ejemplo:&#10;<p>Estimado cliente,</p>&#10;<p>Gracias por contactarnos.</p>"
+                        spellcheck="false"
+                    ></textarea>
+                    <div class="preview-section">
+                        <h4>Vista previa</h4>
+                        <div id="sourcePreview" class="preview-box">
+                            <em>La vista previa aparecerá aquí...</em>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="column">
+                    <div class="column-header">
+                        <h3>🇩🇰 HTML Danés</h3>
+                        <div class="actions">
+                            <button id="copyHtml" class="btn-action" disabled title="Copiar HTML">
+                                📋 Copiar
+                            </button>
+                            <button id="saveHtml" class="btn-action" disabled title="Guardar como .html">
+                                💾 Guardar
+                            </button>
+                        </div>
+                    </div>
+                    <textarea 
+                        id="targetHtml" 
+                        class="text-area code" 
+                        placeholder="El HTML traducido aparecerá aquí..."
+                        readonly
+                    ></textarea>
+                    <div class="preview-section">
+                        <h4>Vista previa</h4>
+                        <div id="targetPreview" class="preview-box">
+                            <em>La vista previa aparecerá aquí...</em>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Glosario y Configuración -->
+        <div class="settings-panel">
+            <details>
+                <summary>⚙️ Configuración y Glosario</summary>
+                <div class="settings-content">
+                    <div class="setting-group">
+                        <label for="glossaryInput">
+                            📚 Glosario personalizado
+                            <span class="help-text">
+                                Un término por línea, formato: español=danés
+                            </span>
+                        </label>
+                        <textarea 
+                            id="glossaryInput" 
+                            class="glossary-input"
+                            placeholder="Acme=Acme&#10;Corporation=Selskab&#10;Python=Python"
+                            rows="5"
+                        ></textarea>
+                    </div>
+
+                    <div class="setting-group">
+                        <label for="maxTokens">
+                            Tokens máximos por traducción: <span id="maxTokensValue">256</span>
+                        </label>
+                        <input 
+                            type="range" 
+                            id="maxTokens" 
+                            min="64" 
+                            max="512" 
+                            value="256" 
+                            step="64"
+                        >
+                    </div>
+
+                    <div class="setting-group">
+                        <label for="apiUrl">
+                            🔌 URL del API
+                        </label>
+                        <input 
+                            type="text" 
+                            id="apiUrl" 
+                            value="http://localhost:8000"
+                            placeholder="http://localhost:8000"
+                        >
+                    </div>
+                </div>
+            </details>
+        </div>
+
+        <!-- Botón de traducción -->
+        <div class="translate-section">
+            <button id="translateBtn" class="btn-translate" disabled>
+                🔄 Traducir
+            </button>
+            <div id="loadingIndicator" class="loading-indicator" hidden>
+                <div class="spinner"></div>
+                <span>Traduciendo...</span>
+            </div>
+            <div id="errorMessage" class="error-message" hidden></div>
+            <div id="successMessage" class="success-message" hidden></div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>
+                Traductor local ES→DA con NLLB + CTranslate2 • 
+                Sin conexión a Internet • 
+                100% privado
+            </p>
+            <p class="footer-links">
+                <a href="http://localhost:8000/docs" target="_blank">📖 API Docs</a> •
+                <a href="https://github.com/facebookresearch/fairseq/tree/nllb" target="_blank">ℹ️ Sobre NLLB</a>
+            </p>
+        </footer>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
+

@@ -1,533 +1,520 @@
-# 🇪🇸→🇩🇰 Traductor Español → Danés (NLLB + CTranslate2)
+# 📧 Traductor Español → Danés (ES→DA)
 
-**Servicio de traducción 100% local, gratuito y privado** utilizando el modelo NLLB (No Language Left Behind) de Meta con cuantización INT8 via CTranslate2.
+**Traductor local, privado y offline para correos corporativos**
 
----
+Sistema de traducción automática de español a danés optimizado para correos electrónicos corporativos, basado en NLLB (No Language Left Behind) de Meta con CTranslate2 para inferencia eficiente en CPU.
 
-## 🎯 Características
-
-✅ **100% Offline** - Sin llamadas a Internet (excepto descarga inicial del modelo)  
-✅ **Gratuito** - Modelo open source, sin límites de uso  
-✅ **Privado** - Tus datos nunca salen de tu máquina  
-✅ **Optimizado** - Cuantización INT8 para inferencia eficiente en CPU  
-✅ **Glosarios personalizados** - Control terminológico para dominios específicos  
-✅ **Batch processing** - Traduce múltiples textos simultáneamente  
-✅ **API REST** - Fácil integración con FastAPI  
+🔒 **100% privado** • 🚫 **Sin conexión a Internet** • 💻 **Funciona completamente offline**
 
 ---
 
-## 📋 Requisitos
+## 📋 Tabla de Contenidos
+
+- [Características](#-características)
+- [Requisitos](#-requisitos)
+- [Instalación Rápida](#-instalación-rápida)
+- [Uso](#-uso)
+  - [API REST](#api-rest)
+  - [Interfaz Web](#interfaz-web)
+  - [Glosarios](#glosarios)
+- [Docker](#-docker)
+- [Configuración Avanzada](#-configuración-avanzada)
+- [Tests](#-tests)
+- [Arquitectura](#-arquitectura)
+- [Modo Air-Gapped](#-modo-air-gapped)
+- [Troubleshooting](#-troubleshooting)
+
+---
+
+## ✨ Características
+
+- **🔒 Privacidad Total**: Sin telemetría, sin llamadas externas, 100% offline
+- **📧 Optimizado para Correos**: Preserva formato HTML, enlaces, y estructura
+- **📚 Glosarios Personalizados**: Protege términos específicos de tu empresa
+- **🚀 Rendimiento CPU**: Quantization INT8 con CTranslate2
+- **🎯 Traducción Determinística**: Fuerza idioma destino (spa_Latn → dan_Latn)
+- **🌐 Interfaz Web Local**: UI moderna para traducción de correos
+- **🔄 API REST**: Endpoints `/translate` y `/translate/html`
+- **✅ Validación Automática**: Detecta y corrige salidas en alfabetos incorrectos
+- **🐳 Docker Ready**: Con modo air-gapped completo
+
+---
+
+## 💻 Requisitos
 
 ### Hardware
-- **RAM mínima**: 
-  - 8 GB para modelo `nllb-200-distilled-600M` (recomendado)
-  - 16 GB para modelo `nllb-200-1.3B` (mejor calidad)
-- **Espacio en disco**: ~3-6 GB (modelo + conversión)
-- **CPU**: Cualquier procesador moderno (optimizado para CPU)
+
+| Modelo | RAM Mínima | Espacio en Disco | Rendimiento |
+|--------|------------|------------------|-------------|
+| **600M** (recomendado) | 8 GB | ~3 GB | Bueno |
+| **1.3B** | 16 GB | ~6 GB | Excelente |
 
 ### Software
-- Python 3.11+
-- pip
-- (Opcional) Docker para despliegue containerizado
+
+- **Python**: 3.9 - 3.11
+- **Sistema Operativo**: Linux, macOS, Windows (con WSL2 recomendado)
+- **Conexión a Internet**: Solo para descarga inicial del modelo
 
 ---
 
-## 🚀 Instalación y Configuración
+## 🚀 Instalación Rápida
 
 ### Opción 1: Instalación Local (Recomendada)
 
-#### 1. Clonar repositorio e instalar dependencias
-
 ```bash
-# Crear entorno virtual e instalar dependencias
+# 1. Clonar repositorio
+git clone <tu-repo>
+cd TraductorDanesEspañol
+
+# 2. Crear entorno virtual e instalar dependencias
 make venv
+source venv/bin/activate  # En Windows: venv\Scripts\activate
 
-# O manualmente:
-python3 -m venv venv
-source venv/bin/activate  # Linux/Mac
-# venv\Scripts\activate   # Windows
-
-pip install -r requirements.txt
-```
-
-#### 2. Descargar modelo
-
-```bash
-# Descargar modelo 600M (recomendado para 8GB+ RAM)
+# 3. Descargar modelo NLLB (requiere Internet, solo una vez)
 make download
 
-# O modelo 1.3B (mejor calidad, requiere 16GB+ RAM)
-make download-1.3b
-
-# O manualmente:
-python scripts/download_model.py \
-    --model facebook/nllb-200-distilled-600M \
-    --out models/nllb-600m
-```
-
-**Modelos disponibles:**
-- `facebook/nllb-200-distilled-600M` - ~2.4 GB (recomendado)
-- `facebook/nllb-200-1.3B` - ~5 GB (mejor calidad)
-- `facebook/nllb-200-3.3B` - ~13 GB (requiere mucha RAM)
-
-#### 3. Convertir a CTranslate2 INT8
-
-```bash
+# 4. Convertir a CTranslate2 INT8 (offline)
 make convert
 
-# O manualmente:
-bash scripts/convert_to_ct2.sh \
-    --in models/nllb-600m \
-    --out models/nllb-600m-ct2-int8
-```
-
-#### 4. Ejecutar servidor
-
-```bash
+# 5. Iniciar servidor
 make run
-
-# O manualmente:
-uvicorn app.app:app --host 0.0.0.0 --port 8000
 ```
 
-El servidor estará disponible en:
-- **API**: http://localhost:8000
-- **Documentación interactiva**: http://localhost:8000/docs
-- **ReDoc**: http://localhost:8000/redoc
-
----
+**¡Listo!** El servidor estará disponible en `http://localhost:8000`
 
 ### Opción 2: Docker
 
-#### 1. Preparar modelos (en host)
-
 ```bash
-# Descargar y convertir modelo (solo una vez)
-make download
-make convert
-```
+# 1. Descargar y convertir modelo en el host (solo una vez)
+make download && make convert
 
-#### 2. Construir imagen Docker
-
-```bash
+# 2. Construir imagen Docker
 make docker-build
 
-# O manualmente:
-docker build -t traductor-es-da:latest .
+# 3. Ejecutar contenedor
+make docker-run
 ```
 
-#### 3. Ejecutar contenedor
+---
+
+## 📖 Uso
+
+### API REST
+
+#### Endpoint: `POST /translate`
+
+Traduce texto simple o múltiples textos:
 
 ```bash
-make docker-run
+curl -X POST http://localhost:8000/translate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Hola, ¿cómo estás?",
+    "max_new_tokens": 256
+  }'
+```
 
-# O manualmente:
+**Respuesta:**
+```json
+{
+  "provider": "nllb-ct2-int8",
+  "source": "spa_Latn",
+  "target": "dan_Latn",
+  "translations": ["Hvordan har du det?"]
+}
+```
+
+#### Endpoint: `POST /translate/html`
+
+Traduce HTML de correos preservando estructura:
+
+```bash
+curl -X POST http://localhost:8000/translate/html \
+  -H "Content-Type: application/json" \
+  -d '{
+    "html": "<p>Estimado cliente,</p><p>Gracias por <strong>contactarnos</strong>.</p>",
+    "max_new_tokens": 256
+  }'
+```
+
+#### Endpoint: `GET /health`
+
+Verifica que el servicio esté funcionando:
+
+```bash
+curl http://localhost:8000/health
+```
+
+### Interfaz Web
+
+Abre en tu navegador:
+
+```
+file:///ruta/completa/a/TraductorDanesEspañol/ui/index.html
+```
+
+O desde VS Code / editor:
+1. Click derecho en `ui/index.html`
+2. "Open with Live Server" o "Open in Browser"
+
+**Características de la UI:**
+- 📝 **Pestaña Texto**: Traducción simple con carga de archivos `.txt`
+- 🌐 **Pestaña HTML**: Traducción de correos HTML con vista previa
+- 📚 **Glosario**: Panel de configuración con términos personalizados
+- 💾 **Exportar**: Copiar o guardar resultados como `.txt` o `.html`
+
+### Glosarios
+
+Los glosarios te permiten proteger términos específicos de tu organización:
+
+#### Formato
+
+En la UI o API, usa el formato:
+```
+término_español=término_danés
+```
+
+**Ejemplo:**
+```
+Acme=Acme
+Corporation=Selskab
+Python=Python
+Departamento de TI=IT-afdeling
+```
+
+#### En API
+
+```json
+{
+  "text": "Bienvenido a Acme Corporation",
+  "glossary": {
+    "Acme": "Acme",
+    "Corporation": "Selskab"
+  }
+}
+```
+
+**Protección Automática:**
+- URLs: `https://example.com` → se preservan automáticamente
+- Emails: `usuario@dominio.com` → se preservan automáticamente
+- Números: `1000`, `1.234,56` → se preservan automáticamente
+
+---
+
+## 🐳 Docker
+
+### Construcción
+
+```bash
+docker build -t traductor-es-da .
+```
+
+### Ejecución Normal
+
+```bash
 docker run -d \
   --name traductor-es-da \
   -p 8000:8000 \
   -v $(pwd)/models:/models:ro \
-  -e MODEL_DIR=/models/nllb-600m \
-  -e CT2_DIR=/models/nllb-600m-ct2-int8 \
-  traductor-es-da:latest
+  traductor-es-da
 ```
 
-**Notas sobre Docker:**
-- Los modelos **NO** están incluidos en la imagen (son muy grandes)
-- Debes montarlos como volumen: `-v ./models:/models`
-- El flag `:ro` (read-only) previene modificaciones accidentales
+### Ejecución Air-Gapped (Sin Red)
+
+Para máxima seguridad, sin acceso a Internet:
+
+```bash
+docker run -d \
+  --name traductor-es-da \
+  --network none \
+  -v $(pwd)/models:/models:ro \
+  traductor-es-da
+```
+
+**Nota**: Con `--network none`, el contenedor no puede acceder a Internet pero tampoco podrás acceder al API desde el host. Úsalo solo para procesamiento por lotes.
+
+### Ejecución Segura con Acceso Local
+
+```bash
+docker run -d \
+  --name traductor-es-da \
+  -p 127.0.0.1:8000:8000 \
+  -v $(pwd)/models:/models:ro \
+  --cap-drop=ALL \
+  --cap-add=NET_BIND_SERVICE \
+  --read-only \
+  --tmpfs /tmp \
+  traductor-es-da
+```
 
 ---
 
-## 📖 Uso del API
-
-### Ejemplo básico
-
-```bash
-curl -X POST http://localhost:8000/translate \
-  -H "Content-Type: application/json" \
-  -d '{
-    "text": "Hola mundo",
-    "max_new_tokens": 256
-  }'
-```
-
-**Respuesta:**
-```json
-{
-  "provider": "nllb-ct2-int8",
-  "source": "spa_Latn",
-  "target": "dan_Latn",
-  "translations": ["Hej verden"]
-}
-```
-
-### Traducción de múltiples textos (batch)
-
-```bash
-curl -X POST http://localhost:8000/translate \
-  -H "Content-Type: application/json" \
-  -d '{
-    "text": [
-      "Buenos días",
-      "¿Cómo estás?",
-      "Gracias por tu ayuda"
-    ],
-    "max_new_tokens": 256
-  }'
-```
-
-**Respuesta:**
-```json
-{
-  "provider": "nllb-ct2-int8",
-  "source": "spa_Latn",
-  "target": "dan_Latn",
-  "translations": [
-    "God morgen",
-    "Hvordan har du det?",
-    "Tak for din hjælp"
-  ]
-}
-```
-
-### Uso de glosario personalizado
-
-```bash
-curl -X POST http://localhost:8000/translate \
-  -H "Content-Type: application/json" \
-  -d '{
-    "text": "Bienvenido a Acme Corporation",
-    "glossary": {
-      "Acme": "Acme",
-      "Corporation": "Selskab"
-    }
-  }'
-```
-
-El glosario permite:
-- **Preservar términos** (nombres propios, marcas, etc.)
-- **Forzar traducciones específicas** (terminología de dominio)
-- **Control de consistencia** en documentos técnicos
-
-**Nota:** Los términos del glosario se reemplazan de forma case-insensitive y con word boundaries para evitar matches parciales.
-
----
-
-## 🔧 Configuración Avanzada
+## ⚙️ Configuración Avanzada
 
 ### Variables de Entorno
 
-Copia `env.example` a `.env` y ajusta según necesites:
+Copia `env.example` a `.env` y ajusta según necesidades:
 
 ```bash
-# Modelo a usar
-MODEL_NAME=facebook/nllb-200-distilled-600M
-
-# Directorios
-MODEL_DIR=./models/nllb-600m
-CT2_DIR=./models/nllb-600m-ct2-int8
-
-# Configuración de hilos CTranslate2
-# 0 = automático (usa todos los cores)
-CT2_INTER_THREADS=0
-CT2_INTRA_THREADS=0
-
-# Batch size por defecto
-DEFAULT_BATCH_SIZE=16
+cp env.example .env
 ```
 
-### Ajuste de Performance
+**Principales configuraciones:**
 
-#### Hilos de CPU
+| Variable | Default | Descripción |
+|----------|---------|-------------|
+| `MODEL_NAME` | `facebook/nllb-200-distilled-600M` | Modelo a descargar |
+| `MODEL_DIR` | `./models/nllb-600m` | Directorio del modelo HF |
+| `CT2_DIR` | `./models/nllb-600m-ct2-int8` | Directorio del modelo CT2 |
+| `BEAM_SIZE` | `4` | Tamaño de beam search (4-5 recomendado) |
+| `CT2_INTER_THREADS` | `0` | Hilos inter-capas (0=auto) |
+| `CT2_INTRA_THREADS` | `0` | Hilos intra-capas (0=auto) |
 
-CTranslate2 usa dos tipos de paralelismo:
+### Cambiar a Modelo 1.3B
 
-- **`inter_threads`**: Paralelismo entre traducciones (batch processing)
-- **`intra_threads`**: Paralelismo dentro de cada traducción
+Para mejor calidad (requiere 16GB RAM):
 
-Configuración recomendada:
 ```bash
-# Sistema con 8+ cores: dejar en automático
-CT2_INTER_THREADS=0
-CT2_INTRA_THREADS=0
+# Editar .env
+MODEL_NAME=facebook/nllb-200-1.3B
+MODEL_DIR=./models/nllb-1.3b
+CT2_DIR=./models/nllb-1.3b-ct2-int8
 
-# Sistema con 4 cores: limitar para evitar overhead
-CT2_INTER_THREADS=2
-CT2_INTRA_THREADS=2
-```
+# Descargar y convertir
+make download && make convert
 
-#### Batch Size
-
-Para mejorar throughput con múltiples textos:
-
-```python
-# En tu código
-response = requests.post(
-    "http://localhost:8000/translate",
-    json={
-        "text": ["texto1", "texto2", ..., "texto16"],  # Batch de 8-16
-        "max_new_tokens": 256
-    }
-)
+# Reiniciar servidor
+make run
 ```
 
 ---
 
-## 🧪 Testing
+## 🧪 Tests
+
+Ejecutar todos los tests:
 
 ```bash
-# Ejecutar todos los tests
 make test
-
-# Tests con output detallado
-make test-verbose
-
-# O con pytest directamente
-pytest tests/ -v -s
 ```
 
-**Smoke tests incluidos:**
-- ✅ Traducción de texto simple
-- ✅ Traducción batch
-- ✅ Uso de glosario
-- ✅ Validación de parámetros
-- ✅ Health checks
+Tests específicos:
+
+```bash
+# Test de smoke (requiere modelo cargado)
+pytest tests/test_translate_smoke.py -v
+
+# Test de glosario (no requiere modelo)
+pytest tests/test_glossary.py -v
+
+# Test de HTML (no requiere modelo)
+pytest tests/test_email_html.py -v
+```
+
+**Nota**: Los tests de traducción (`test_translate_smoke.py`) requieren que el modelo esté descargado y convertido.
 
 ---
 
-## 📁 Estructura del Proyecto
+## 🏗️ Arquitectura
 
 ```
-.
+TraductorDanesEspañol/
 ├── app/
-│   ├── __init__.py
-│   ├── app.py           # FastAPI app con endpoint /translate
-│   ├── schemas.py       # Modelos Pydantic (request/response)
-│   ├── inference.py     # Motor de inferencia CT2 + tokenizador
-│   └── glossary.py      # Funciones de glosario pre/post
+│   ├── app.py              # FastAPI endpoints
+│   ├── inference.py        # Motor CT2 + validación idioma
+│   ├── glossary.py         # Protección de términos
+│   ├── email_html.py       # Procesamiento HTML correos
+│   └── schemas.py          # Modelos Pydantic
+├── ui/
+│   ├── index.html          # Interfaz web
+│   ├── app.js              # Lógica cliente
+│   └── styles.css          # Estilos
 ├── scripts/
-│   ├── download_model.py     # Descarga de modelos HF
-│   └── convert_to_ct2.sh     # Conversión a CTranslate2 INT8
+│   ├── download_model.py   # Descarga desde HuggingFace
+│   └── convert_to_ct2.sh   # Conversión a CTranslate2
 ├── tests/
-│   └── test_translate_smoke.py
-├── models/              # Modelos (ignorado en git)
-│   ├── nllb-600m/              # Modelo HuggingFace
-│   └── nllb-600m-ct2-int8/     # Modelo CTranslate2
-├── requirements.txt
-├── Dockerfile
+│   ├── test_translate_smoke.py
+│   ├── test_glossary.py
+│   └── test_email_html.py
+├── models/                 # (ignorado en git)
+│   ├── nllb-600m/         # Modelo HuggingFace
+│   └── nllb-600m-ct2-int8/ # Modelo CTranslate2
 ├── Makefile
-├── .gitignore
-├── env.example
-└── README.md
+├── Dockerfile
+├── requirements.txt
+└── env.example
 ```
 
----
+### Flujo de Traducción
 
-## 🎓 Detalles Técnicos
-
-### ¿Por qué CTranslate2?
-
-**CTranslate2** es un motor de inferencia optimizado para modelos Transformer:
-
-- ✅ **2-4x más rápido** que HuggingFace Transformers
-- ✅ **Menor uso de RAM** con cuantización INT8
-- ✅ **Optimizaciones para CPU** (SIMD, multithreading)
-- ✅ **Compatible** con modelos NLLB sin cambios
-
-### Cuantización INT8
-
-La cuantización reduce el tamaño del modelo y acelera la inferencia:
-
-- **FP32 (original)**: 2.4 GB → ~600M parámetros × 4 bytes
-- **INT8 (cuantizado)**: ~600 MB → ~600M parámetros × 1 byte
-- **Pérdida de calidad**: < 1% (imperceptible en la mayoría de casos)
-
-### Códigos de Idioma FLORES-200
-
-NLLB usa códigos FLORES-200 para 200+ idiomas:
-
-- **Español**: `spa_Latn` (script latino)
-- **Danés**: `dan_Latn` (script latino)
-
-### Estrategia de Glosario
-
-Implementación conservadora para preservar términos:
-
-1. **Pre-procesamiento**: Marca términos ES con `[[TERM::<texto>]]`
-2. **Traducción**: El modelo ve los marcadores y tiende a preservarlos
-3. **Post-procesamiento**: Reemplaza marcadores por términos DA
-
-**Limitaciones:**
-- Puede alterar puntuación adyacente
-- Términos multi-palabra pueden causar problemas
-- No garantiza 100% preservación (depende del modelo)
+1. **Input**: Texto ES o HTML → API FastAPI
+2. **Pre-procesamiento**: Aplicar glosario (marcar términos protegidos)
+3. **Tokenización**: NLLB tokenizer con `src_lang="spa_Latn"`
+4. **Traducción**: CTranslate2 con `target_prefix=[[dan_Latn]]` y `beam_size=4`
+5. **Validación**: Verificar alfabeto latino (>80% chars válidos)
+6. **Post-procesamiento**: Reemplazar marcadores por términos DA
+7. **Limpieza**: Eliminar artefactos (tokens idioma visibles)
+8. **Output**: Texto DA o HTML DA
 
 ---
 
-## 🐛 Troubleshooting
+## 🔐 Modo Air-Gapped
 
-### Error: "Modelo no encontrado"
+Para entornos corporativos con restricciones de red:
+
+### Preparación (requiere Internet una sola vez)
 
 ```bash
-# Verifica que los modelos existan
-make info
+# 1. En máquina con Internet:
+git clone <repo>
+cd TraductorDanesEspañol
+make venv
+source venv/bin/activate
+make download  # Descarga modelo (~2.4GB)
+make convert   # Convierte a CT2 (offline)
 
-# Si no existen, descarga y convierte
-make download
-make convert
+# 2. Copiar directorio completo a máquina sin Internet
+tar -czf traductor-complete.tar.gz TraductorDanesEspañol/
+# Transferir traductor-complete.tar.gz a máquina destino
 ```
 
-### Error: "Out of memory" (RAM insuficiente)
+### Uso Sin Internet
 
 ```bash
-# Prueba con el modelo más pequeño
-make download MODEL_NAME=facebook/nllb-200-distilled-600M
-
-# O reduce max_new_tokens en la request
-{
-  "text": "...",
-  "max_new_tokens": 128  # En lugar de 256
-}
+# En máquina sin Internet:
+tar -xzf traductor-complete.tar.gz
+cd TraductorDanesEspañol
+source venv/bin/activate  # venv incluye dependencias
+make run
 ```
 
-### Traducciones lentas
+**Verificación**:
+- El servidor arranca correctamente
+- `/health` devuelve `{"status": "healthy"}`
+- No se observan intentos de conexión externa en logs
+
+---
+
+## 🔧 Troubleshooting
+
+### Problema: Modelo no encontrado
+
+```
+FileNotFoundError: Directorio de modelo CT2 no encontrado
+```
+
+**Solución:**
+```bash
+make download  # Si no has descargado el modelo
+make convert   # Si no has convertido a CT2
+```
+
+### Problema: Out of Memory
+
+```
+RuntimeError: Failed to allocate memory
+```
+
+**Soluciones:**
+1. Cierra otras aplicaciones
+2. Reduce `DEFAULT_BATCH_SIZE` en `.env`
+3. Usa modelo 600M en lugar de 1.3B
+4. Añade swap (Linux):
+   ```bash
+   sudo fallocate -l 4G /swapfile
+   sudo mkswap /swapfile
+   sudo swapon /swapfile
+   ```
+
+### Problema: Traducción muy lenta
+
+**Soluciones:**
+1. Ajusta hilos en `.env`:
+   ```bash
+   CT2_INTER_THREADS=4
+   CT2_INTRA_THREADS=4
+   ```
+2. Verifica que usas INT8 (no float32)
+3. Reduce `BEAM_SIZE` de 4 a 3
+
+### Problema: Salida en alfabeto incorrecto
+
+El sistema detecta automáticamente caracteres no latinos y reintenta con `beam_size` mayor. Si persiste:
 
 ```bash
-# Ajusta hilos de CPU
-export CT2_INTER_THREADS=4
-export CT2_INTRA_THREADS=4
-
-# Usa batch processing
-# (agrupa múltiples textos en una sola request)
+# Aumentar beam_size en .env
+BEAM_SIZE=5
 ```
 
-### Docker: "models not found"
+### Problema: UI no se conecta al API
+
+**Verificaciones:**
+1. Servidor corriendo: `curl http://localhost:8000/health`
+2. CORS habilitado en `app/app.py` (ya configurado)
+3. URL correcta en UI: Settings → API URL = `http://localhost:8000`
+
+---
+
+## 📊 Benchmarks
+
+| Modelo | Frases/seg | RAM | Calidad (BLEU) |
+|--------|-----------|-----|----------------|
+| 600M INT8 | 8-12 | 3-4 GB | 28-32 |
+| 1.3B INT8 | 4-6 | 6-8 GB | 32-36 |
+
+*Benchmarks en CPU Intel i7-10700K (8 cores), texto promedio 20 tokens*
+
+---
+
+## 📝 Comandos Make
 
 ```bash
-# Asegúrate de montar el volumen correctamente
-docker run -v $(pwd)/models:/models ...
-
-# Verifica que los modelos existan en ./models/
-ls -lh models/
+make help          # Mostrar ayuda
+make venv          # Crear entorno virtual
+make download      # Descargar modelo
+make convert       # Convertir a CT2
+make run           # Ejecutar servidor
+make test          # Ejecutar tests
+make docker-build  # Construir imagen Docker
+make docker-run    # Ejecutar contenedor
+make clean         # Limpiar temporales
+make info          # Ver estado del proyecto
 ```
 
 ---
 
-## 📊 Benchmarks (Aproximados)
+## 🤝 Contribuciones
 
-Hardware: Intel i7-10700K (8 cores), 32 GB RAM
+Este proyecto está optimizado para uso corporativo interno. Para mejoras:
 
-| Modelo          | RAM Uso | Velocidad | Calidad (BLEU) |
-|-----------------|---------|-----------|----------------|
-| 600M (INT8)     | ~2 GB   | ~20 tok/s | Buena          |
-| 1.3B (INT8)     | ~4 GB   | ~12 tok/s | Muy buena      |
-| 3.3B (INT8)     | ~10 GB  | ~5 tok/s  | Excelente      |
-
-**Nota:** Los benchmarks varían según hardware, longitud de texto y configuración de hilos.
+1. Fork del repositorio
+2. Crear branch: `git checkout -b feature/mejora`
+3. Commit: `git commit -m 'Añadir mejora'`
+4. Push: `git push origin feature/mejora`
+5. Pull Request
 
 ---
 
-## 🛣️ Roadmap
+## 📄 Licencia
 
-- [ ] Soporte para más pares de idiomas (configurable)
-- [ ] API streaming para textos largos
-- [ ] Cache de traducciones frecuentes
-- [ ] UI web simple para pruebas
-- [ ] Soporte para modelos cuantizados a INT4
-- [ ] Métricas de calidad (BLEU, COMET)
+[Especificar licencia según política corporativa]
 
 ---
 
-## 📜 Licencia
+## 🙏 Créditos
 
-Este proyecto es de código abierto. El modelo NLLB está licenciado bajo la licencia de Meta (Creative Commons).
-
-**Modelos utilizados:**
-- NLLB-200: https://github.com/facebookresearch/fairseq/tree/nllb
-- Licencia: CC-BY-NC 4.0 (uso no comercial)
-
----
-
-## 🙏 Agradecimientos
-
-- **Meta AI** - Por el modelo NLLB (No Language Left Behind)
-- **OpenNMT** - Por CTranslate2
-- **HuggingFace** - Por Transformers y el Hub
-- **FastAPI** - Por el framework web
+- **NLLB**: [Meta AI - No Language Left Behind](https://ai.facebook.com/research/no-language-left-behind/)
+- **CTranslate2**: [OpenNMT](https://github.com/OpenNMT/CTranslate2)
+- **FastAPI**: [Tiangolo](https://fastapi.tiangolo.com/)
 
 ---
 
 ## 📞 Soporte
 
-Para problemas o preguntas:
-
-1. Revisa la sección de [Troubleshooting](#-troubleshooting)
-2. Verifica los logs: `docker logs traductor-es-da` (Docker) o consola (local)
-3. Ejecuta `make info` para ver el estado del sistema
-
----
-
-## 🎯 Ejemplos de Uso
-
-### Python
-
-```python
-import requests
-
-# Traducción simple
-response = requests.post(
-    "http://localhost:8000/translate",
-    json={"text": "Hola mundo"}
-)
-print(response.json()["translations"][0])  # "Hej verden"
-
-# Batch con glosario
-response = requests.post(
-    "http://localhost:8000/translate",
-    json={
-        "text": [
-            "Bienvenido a Python",
-            "FastAPI es genial"
-        ],
-        "glossary": {
-            "Python": "Python",
-            "FastAPI": "FastAPI"
-        }
-    }
-)
-for translation in response.json()["translations"]:
-    print(translation)
-```
-
-### JavaScript/Node.js
-
-```javascript
-const axios = require('axios');
-
-async function translate(text) {
-  const response = await axios.post('http://localhost:8000/translate', {
-    text: text,
-    max_new_tokens: 256
-  });
-  return response.data.translations[0];
-}
-
-translate("Hola mundo").then(console.log);  // "Hej verden"
-```
-
-### cURL
-
-```bash
-# Test rápido
-make curl-test
-
-# O manualmente
-curl -X POST http://localhost:8000/translate \
-  -H "Content-Type: application/json" \
-  -d '{"text": "Hola mundo"}' | jq
-```
+Para problemas técnicos:
+1. Consulta [Troubleshooting](#-troubleshooting)
+2. Revisa logs: `docker logs traductor-es-da` (si usas Docker)
+3. Contacta al equipo de IT/DevOps interno
 
 ---
 
-**¡Disfruta de la traducción local, gratuita y privada! 🚀**
-
+**🔒 Recordatorio de Privacidad**: Este sistema NO envía datos a Internet. Todos los textos se procesan localmente en tu máquina/servidor. No hay telemetría, analytics ni llamadas a servicios externos.

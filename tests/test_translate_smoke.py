@@ -224,6 +224,65 @@ def test_various_spanish_phrases(client, text, expected_not_empty):
     print(f"\n'{text}' → '{translation}'")
 
 
+def test_translation_output_is_latin(client):
+    """Test que verifica que la salida es en alfabeto latino (danés)."""
+    payload = {
+        "text": "Hola, ¿cómo estás?"
+    }
+    
+    response = client.post("/translate", json=payload)
+    assert response.status_code == 200
+    
+    data = response.json()
+    translation = data["translations"][0]
+    
+    # Verificar que la traducción no está vacía
+    assert len(translation.strip()) > 0
+    
+    # Verificar que contiene principalmente caracteres latinos
+    # Permitir letras latinas, danesas (æ, ø, å), números y puntuación
+    import re
+    latin_pattern = re.compile(
+        r'[a-zA-ZæøåÆØÅàáâãäåèéêëìíîïòóôõöùúûüýÿñçÀÁÂÃÄÅÈÉÊËÌÍÎÏÒÓÔÕÖÙÚÛÜÝŸÑÇ0-9\s\.,;:!?¿¡\-\'\"()\[\]{}/@#$%&*+=<>|\\~`]'
+    )
+    
+    latin_chars = len(latin_pattern.findall(translation))
+    total_chars = len(translation)
+    
+    if total_chars > 0:
+        ratio = latin_chars / total_chars
+        # Al menos 80% debe ser caracteres latinos
+        assert ratio >= 0.8, f"Salida con demasiados caracteres no latinos: {ratio:.2%} latinos. Traducción: {translation}"
+    
+    print(f"\n✓ Traducción en alfabeto latino: '{translation}' ({ratio:.1%} caracteres latinos)")
+
+
+def test_translate_html_endpoint(client):
+    """Test del endpoint /translate/html."""
+    payload = {
+        "html": "<p>Hola <strong>mundo</strong></p>",
+        "max_new_tokens": 128
+    }
+    
+    response = client.post("/translate/html", json=payload)
+    assert response.status_code == 200
+    
+    data = response.json()
+    assert "html" in data
+    assert data["provider"] == "nllb-ct2-int8"
+    assert data["source"] == "spa_Latn"
+    assert data["target"] == "dan_Latn"
+    
+    # Verificar que el HTML no está vacío
+    html = data["html"]
+    assert len(html.strip()) > 0
+    
+    # Verificar que preserva algunas etiquetas
+    assert "<p>" in html or "<strong>" in html or "mundo" in html
+    
+    print(f"\nHTML traducido: {html}")
+
+
 if __name__ == "__main__":
     # Permitir ejecutar tests directamente
     pytest.main([__file__, "-v", "-s"])
