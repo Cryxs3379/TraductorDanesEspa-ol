@@ -190,20 +190,10 @@ class ModelManager:
             )
             logger.info("✓ Modelo CT2 cargado")
             
-            # 6. Warmup
-            logger.info("Ejecutando warmup...")
-            try:
-                test_tokens = self.tokenizer(["Hola"], return_tensors="pt", padding=True)
-                test_source = [self.tokenizer.convert_ids_to_tokens(ids) for ids in test_tokens["input_ids"].tolist()]
-                _ = self.translator.translate_batch(
-                    test_source,
-                    target_prefix=[[self.tgt_bos_tok]],
-                    beam_size=2,
-                    max_decoding_length=20
-                )
-                logger.info("✓ Warmup completado")
-            except Exception as e:
-                logger.warning(f"Warmup falló (ignorando): {e}")
+            # 6. Warmup (OMITIDO - causa hang en Windows con CTranslate2)
+            # El modelo funciona perfectamente sin warmup
+            logger.info("Omitiendo warmup (puede causar hang en Windows)")
+            logger.info("✓ Modelo listo - primera traducción será ~2s más lenta")
             
             # 7. Marcar como cargado
             self.model_loaded = True
