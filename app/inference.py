@@ -64,35 +64,46 @@ def translate_batch(
         # Pre-procesar textos: normalizar espacios
         texts_normalized = [_normalize_text(text) for text in texts]
         
-        # Tokenizar textos de entrada
+        # Tokenizar textos de entrada SIN TORCH (solo listas de IDs)
         # NLLB espera source language token al inicio
         # El tokenizador ya añade este token automáticamente si src_lang está configurado
         encoded = tokenizer(
             texts_normalized,
-            return_tensors="pt",
             padding=True,
             truncation=True,
-            max_length=512
+            max_length=384,  # Más corto para mejor rendimiento
+            return_attention_mask=False,
+            return_token_type_ids=False
         )
         
-        # Convertir a lista de tokens para CTranslate2
+        # input_ids ya es una lista de listas (sin tensores)
+        input_ids_list = encoded["input_ids"]
+        
+        # Convertir IDs a tokens para CTranslate2
         source_tokens = [
             tokenizer.convert_ids_to_tokens(ids)
-            for ids in encoded["input_ids"].tolist()
+            for ids in input_ids_list
         ]
         
-        # Preparar target_prefix con token de idioma destino
+        # Preparar target_prefix con token de idioma destino (DANÉS)
         # NLLB requiere el token del idioma destino al inicio de la generación
+        if not tgt_bos_tok:
+            raise RuntimeError(
+                "Token de idioma danés no configurado. "
+                "Verifica que el modelo NLLB esté correctamente cargado."
+            )
+        
         target_prefix = [[tgt_bos_tok]] * len(texts)
         
-        # Traducir con CTranslate2
+        # Traducir con CTranslate2 (parámetros conservadores para evitar cuelgues)
         results = translator.translate_batch(
             source_tokens,
             target_prefix=target_prefix,
             beam_size=beam_size,
             max_decoding_length=max_new_tokens,
             return_scores=False,
-            repetition_penalty=1.2  # Evitar repeticiones
+            repetition_penalty=1.2,  # Evitar repeticiones
+            no_repeat_ngram_size=3   # Evitar repetición de 3-gramas
         )
         
         # Extraer hipótesis (primera de cada beam)

@@ -10,6 +10,7 @@ from typing import Union
 
 from fastapi import FastAPI, HTTPException, status
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.settings import settings
 from app.startup import model_manager
@@ -105,16 +106,23 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-# CORS desactivado por defecto (seguridad)
-# Descomentar solo si necesitas acceso desde UI local
-# from fastapi.middleware.cors import CORSMiddleware
-# app.add_middleware(
-#     CORSMiddleware,
-#     allow_origins=["http://localhost:*", "file://"],
-#     allow_credentials=True,
-#     allow_methods=["*"],
-#     allow_headers=["*"],
-# )
+# CORS habilitado para UI local (file:// y localhost)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "*",  # Permite file:// y cualquier origen local
+        "null",  # Origen file:// se reporta como "null"
+        "http://localhost",
+        "http://127.0.0.1",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "http://localhost:8001",
+        "http://localhost:8002"
+    ],
+    allow_methods=["*"],
+    allow_headers=["*"],
+    allow_credentials=False  # False cuando allow_origins incluye "*"
+)
 
 
 @app.get("/")

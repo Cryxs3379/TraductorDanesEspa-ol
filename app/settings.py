@@ -16,11 +16,11 @@ class Settings:
     MODEL_DIR: str = os.getenv("MODEL_DIR", "./models/nllb-600m")
     CT2_DIR: str = os.getenv("CT2_DIR", "./models/nllb-600m-ct2-int8")
     
-    # CTranslate2 performance
-    CT2_INTER_THREADS: int = int(os.getenv("CT2_INTER_THREADS", "0"))
-    CT2_INTRA_THREADS: int = int(os.getenv("CT2_INTRA_THREADS", "0"))
-    BEAM_SIZE: int = int(os.getenv("BEAM_SIZE", "4"))
-    MAX_NEW_TOKENS: int = int(os.getenv("MAX_NEW_TOKENS", "256"))
+    # CTranslate2 performance (valores conservadores para evitar cuelgues)
+    CT2_INTER_THREADS: int = int(os.getenv("CT2_INTER_THREADS", "4"))
+    CT2_INTRA_THREADS: int = int(os.getenv("CT2_INTRA_THREADS", "4"))
+    BEAM_SIZE: int = int(os.getenv("BEAM_SIZE", "3"))
+    MAX_NEW_TOKENS: int = int(os.getenv("MAX_NEW_TOKENS", "192"))
     
     # Servidor
     HOST: str = os.getenv("HOST", "0.0.0.0")

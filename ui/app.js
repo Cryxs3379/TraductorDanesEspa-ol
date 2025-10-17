@@ -10,8 +10,25 @@ const state = {
     apiUrl: 'http://localhost:8000',
     currentTab: 'text',
     isTranslating: false,
-    apiOnline: false
+    apiOnline: false,
+    timeout: 60000  // 60 segundos timeout
 };
+
+/**
+ * Fetch con timeout usando AbortController
+ */
+function fetchWithTimeout(resource, options = {}) {
+    const { timeout = state.timeout } = options;
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeout);
+    
+    const fetchOptions = {
+        ...options,
+        signal: controller.signal
+    };
+    
+    return fetch(resource, fetchOptions).finally(() => clearTimeout(id));
+}
 
 // Elementos del DOM
 const elements = {
@@ -196,9 +213,9 @@ function toggleTranslateButton() {
  */
 async function checkAPIStatus() {
     try {
-        const response = await fetch(`${state.apiUrl}/health`, {
+        const response = await fetchWithTimeout(`${state.apiUrl}/health`, {
             method: 'GET',
-            signal: AbortSignal.timeout(5000)
+            timeout: 5000
         });
         
         const data = await response.json();
@@ -295,7 +312,13 @@ async function translate() {
         
     } catch (error) {
         console.error('Error en traducción:', error);
-        showError(`Error: ${error.message}`);
+        
+        // Manejo específico de timeout
+        if (error.name === 'AbortError') {
+            showError('⏱️ Timeout: La traducción tardó más de 60 segundos. Intenta con un texto más corto.');
+        } else {
+            showError(`Error: ${error.message}`);
+        }
     } finally {
         state.isTranslating = false;
         elements.loadingIndicator.hidden = true;
@@ -304,10 +327,10 @@ async function translate() {
 }
 
 /**
- * Traducir texto
+ * Traducir texto con timeout
  */
 async function translateText(text, maxNewTokens, glossary) {
-    const response = await fetch(`${state.apiUrl}/translate`, {
+    const response = await fetchWithTimeout(`${state.apiUrl}/translate`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
@@ -316,7 +339,8 @@ async function translateText(text, maxNewTokens, glossary) {
             text: text,
             max_new_tokens: maxNewTokens,
             glossary: glossary
-        })
+        }),
+        timeout: 60000  // 60 segundos
     });
     
     if (!response.ok) {
@@ -328,10 +352,10 @@ async function translateText(text, maxNewTokens, glossary) {
 }
 
 /**
- * Traducir HTML
+ * Traducir HTML con timeout
  */
 async function translateHTML(html, maxNewTokens, glossary) {
-    const response = await fetch(`${state.apiUrl}/translate/html`, {
+    const response = await fetchWithTimeout(`${state.apiUrl}/translate/html`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
@@ -340,7 +364,8 @@ async function translateHTML(html, maxNewTokens, glossary) {
             html: html,
             max_new_tokens: maxNewTokens,
             glossary: glossary
-        })
+        }),
+        timeout: 60000  // 60 segundos
     });
     
     if (!response.ok) {
