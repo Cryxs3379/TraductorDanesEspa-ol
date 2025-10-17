@@ -98,6 +98,17 @@ body {
     50% { opacity: 0.5; }
 }
 
+/* Metrics bar */
+.metrics-bar {
+    margin-top: 0.75rem;
+    padding: 0.5rem 1rem;
+    background: var(--bg-color);
+    border-radius: var(--radius-sm);
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    text-align: center;
+}
+
 /* Tabs */
 .tabs {
     display: flex;

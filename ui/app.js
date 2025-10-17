@@ -11,7 +11,9 @@ const state = {
     currentTab: 'text',
     isTranslating: false,
     apiOnline: false,
-    timeout: 60000  // 60 segundos timeout
+    timeout: 60000,  // 60 segundos timeout
+    lastLatency: null,
+    cacheStats: null
 };
 
 /**
@@ -224,7 +226,22 @@ async function checkAPIStatus() {
             state.apiOnline = true;
             elements.statusIndicator.classList.add('online');
             elements.statusIndicator.classList.remove('offline');
-            elements.statusIndicator.querySelector('.status-text').textContent = 'API en línea';
+            
+            // Mostrar estado del modelo
+            if (data.model_loaded) {
+                elements.statusIndicator.querySelector('.status-text').textContent = 'API en línea • Modelo listo';
+                elements.translateBtn.disabled = false;
+                
+                // Mostrar métricas
+                const metricsBar = document.getElementById('metricsBar');
+                if (metricsBar) {
+                    metricsBar.hidden = false;
+                }
+                updateCacheStats();
+            } else {
+                elements.statusIndicator.querySelector('.status-text').textContent = 'API en línea • Modelo cargando...';
+                elements.translateBtn.disabled = true;
+            }
         } else {
             throw new Error('API no saludable');
         }
@@ -277,6 +294,8 @@ async function translate() {
     elements.errorMessage.hidden = true;
     elements.successMessage.hidden = true;
     
+    const startTime = performance.now();
+    
     try {
         const glossary = parseGlossary();
         const maxNewTokens = parseInt(elements.maxTokens.value);
@@ -308,14 +327,25 @@ async function translate() {
             elements.saveHtml.disabled = false;
         }
         
-        showSuccess('✓ Traducción completada exitosamente');
+        // Medir latencia
+        const endTime = performance.now();
+        state.lastLatency = Math.round(endTime - startTime);
+        
+        // Actualizar caché stats
+        updateCacheStats();
+        
+        showSuccess(`✓ Traducción completada en ${state.lastLatency}ms`);
         
     } catch (error) {
         console.error('Error en traducción:', error);
         
-        // Manejo específico de timeout
+        // Manejo específico de errores
         if (error.name === 'AbortError') {
             showError('⏱️ Timeout: La traducción tardó más de 60 segundos. Intenta con un texto más corto.');
+        } else if (error.message.includes('503')) {
+            showError('⏳ El modelo está cargando. Espera unos segundos y vuelve a intentar.');
+        } else if (error.message.includes('422')) {
+            showError('⚠️ No se pudo asegurar salida en danés. Reduce el tamaño del texto o reintenta.');
         } else {
             showError(`Error: ${error.message}`);
         }
@@ -323,6 +353,29 @@ async function translate() {
         state.isTranslating = false;
         elements.loadingIndicator.hidden = true;
         toggleTranslateButton();
+    }
+}
+
+/**
+ * Actualizar estadísticas de caché
+ */
+async function updateCacheStats() {
+    try {
+        const response = await fetchWithTimeout(`${state.apiUrl}/info`, {
+            method: 'GET',
+            timeout: 5000
+        });
+        const data = await response.json();
+        state.cacheStats = data.cache;
+        
+        // Actualizar UI si hay un elemento para stats
+        const statsElement = document.getElementById('cacheStats');
+        if (statsElement && state.cacheStats) {
+            statsElement.textContent = `Cache: ${state.cacheStats.hit_rate} (${state.cacheStats.hits} hits)`;
+        }
+    } catch (error) {
+        // Ignorar errores de stats - no son críticos
+        console.debug('No se pudieron obtener stats de caché:', error);
     }
 }
 

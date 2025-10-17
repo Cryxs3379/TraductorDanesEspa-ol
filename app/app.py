@@ -7,8 +7,9 @@ import logging
 import threading
 from contextlib import asynccontextmanager
 from typing import Union
+from datetime import datetime
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, status, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -24,26 +25,7 @@ from app.inference import translate_batch
 from app.glossary import apply_glossary_pre, apply_glossary_post
 from app.segment import split_text_for_email, split_html_preserving_structure, rehydrate_html
 from app.cache import translation_cache
-
-
-def sanitize_html(html: str) -> str:
-    """
-    Sanitiza HTML removiendo scripts y event handlers peligrosos.
-    
-    Args:
-        html: HTML a sanitizar
-        
-    Returns:
-        HTML limpio
-    """
-    import re
-    # Remover scripts
-    html = re.sub(r'<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>', '', html, flags=re.IGNORECASE)
-    # Remover event handlers
-    html = re.sub(r'\s*on\w+\s*=\s*["\']?[^"\']*["\']?', '', html, flags=re.IGNORECASE)
-    # Remover javascript: en hrefs
-    html = re.sub(r'href\s*=\s*["\']?\s*javascript:', 'href="#', html, flags=re.IGNORECASE)
-    return html
+from app.utils_html import sanitize_html
 
 
 # Configuración de logging
@@ -52,6 +34,10 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Tiempo de inicio del servidor
+SERVER_START_TIME = datetime.now()
+VERSION = "1.0.0"
 
 
 @asynccontextmanager
@@ -146,6 +132,18 @@ app.add_middleware(
 )
 
 
+# Middleware de seguridad
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    """Añade cabeceras de seguridad a todas las respuestas."""
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    return response
+
+
 @app.get("/")
 async def root():
     """Endpoint raíz con información del servicio."""
@@ -224,15 +222,17 @@ async def translate(request: TranslateRequest):
     - `target`: Código de idioma destino (dan_Latn)
     - `translations`: Lista de traducciones
     """
+    import time
+    start_time = time.time()
+    
     # Verificar que el modelo esté cargado
     if not model_manager.model_loaded:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=(
-                "Modelo no cargado. "
-                "Revisa /health para diagnóstico. "
-                "Si los modelos no están descargados, ejecuta: "
-                "make download && make convert"
+                "El modelo está cargando o no está disponible. "
+                "Espera unos segundos y reintenta. "
+                "Consulta /health para diagnóstico detallado."
             )
         )
     
@@ -298,11 +298,17 @@ async def translate(request: TranslateRequest):
             # Unir con doble espacio
             translations.append(' '.join(segs_for_this_text))
         
+        # Métricas finales
+        elapsed_ms = int((time.time() - start_time) * 1000)
+        
         if not settings.LOG_TRANSLATIONS:
-            logger.info(f"✓ Traducción completada ({len(texts_to_translate)} textos, {len(all_segments)} segmentos)")
+            logger.info(
+                f"✓ Traducción completada: {len(texts_to_translate)} textos, "
+                f"{len(all_segments)} segmentos, {elapsed_ms}ms"
+            )
             # Log de estadísticas de caché
             stats = translation_cache.stats()
-            logger.info(f"  Caché: {stats['hit_rate']} hit rate ({stats['hits']} hits, {stats['misses']} misses)")
+            logger.info(f"  Caché: {stats['hit_rate']} ({stats['hits']} hits, {stats['misses']} misses)")
         
         # Construir respuesta
         response = TranslateResponse(
@@ -316,6 +322,13 @@ async def translate(request: TranslateRequest):
         
     except HTTPException:
         raise
+    except ValueError as e:
+        # Error de validación (no latino)
+        logger.error(f"Validación falló: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"No se pudo asegurar salida en danés: {str(e)}"
+        )
     except Exception as e:
         logger.error(f"Error en traducción: {e}", exc_info=True)
         raise HTTPException(
@@ -350,15 +363,17 @@ async def translate_html_endpoint(request: TranslateHTMLRequest):
     - `target`: Código de idioma destino (dan_Latn)
     - `html`: HTML traducido con estructura preservada
     """
+    import time
+    start_time = time.time()
+    
     # Verificar que el modelo esté cargado
     if not model_manager.model_loaded:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=(
-                "Modelo no cargado. "
-                "Revisa /health para diagnóstico. "
-                "Si los modelos no están descargados, ejecuta: "
-                "make download && make convert"
+                "El modelo está cargando o no está disponible. "
+                "Espera unos segundos y reintenta. "
+                "Consulta /health para diagnóstico detallado."
             )
         )
     
@@ -412,10 +427,13 @@ async def translate_html_endpoint(request: TranslateHTMLRequest):
         # Reconstruir HTML
         html_translated = rehydrate_html(blocks, translated_texts)
         
+        # Métricas finales
+        elapsed_ms = int((time.time() - start_time) * 1000)
+        
         if not settings.LOG_TRANSLATIONS:
-            logger.info(f"✓ HTML traducido ({len(texts_to_translate)} bloques)")
+            logger.info(f"✓ HTML traducido: {len(texts_to_translate)} bloques, {elapsed_ms}ms")
             stats = translation_cache.stats()
-            logger.info(f"  Caché: {stats['hit_rate']} hit rate")
+            logger.info(f"  Caché: {stats['hit_rate']} ({stats['hits']} hits)")
         
         # Construir respuesta
         response = TranslateHTMLResponse(
@@ -429,6 +447,13 @@ async def translate_html_endpoint(request: TranslateHTMLRequest):
         
     except HTTPException:
         raise
+    except ValueError as e:
+        # Error de validación (no latino)
+        logger.error(f"Validación HTML falló: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"No se pudo asegurar salida en danés: {str(e)}"
+        )
     except Exception as e:
         logger.error(f"Error en traducción HTML: {e}", exc_info=True)
         raise HTTPException(
@@ -439,11 +464,17 @@ async def translate_html_endpoint(request: TranslateHTMLRequest):
 
 @app.get("/info")
 async def info():
-    """Devuelve información detallada del modelo cargado."""
+    """Devuelve información detallada del modelo y métricas del servidor."""
     health_info = model_manager.health()
     cache_stats = translation_cache.stats()
     
+    # Calcular uptime
+    uptime_delta = datetime.now() - SERVER_START_TIME
+    uptime_str = str(uptime_delta).split('.')[0]  # Formato HH:MM:SS
+    
     return {
+        "version": VERSION,
+        "uptime": uptime_str,
         "model": {
             "loaded": health_info["model_loaded"],
             "paths": health_info["paths"],
@@ -459,6 +490,7 @@ async def info():
             "supports_cache": True,
             "supports_segmentation": True,
             "supports_formal_style": True,
+            "supports_case_insensitive_glossary": True,
             "max_batch_size": settings.MAX_BATCH_SIZE,
             "max_tokens_per_translation": 512
         },
