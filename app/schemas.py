@@ -1,7 +1,7 @@
 """
 Pydantic schemas para validación de request/response del API.
 """
-from typing import Union, Optional
+from typing import Union, Optional, Literal
 from pydantic import BaseModel, Field
 
 
@@ -38,17 +38,25 @@ class TranslateRequest(BaseModel):
         default=False,
         description="Aplicar estilo formal danés (De/Dem en lugar de du/dig)"
     )
+    direction: Literal["es-da", "da-es"] = Field(
+        default="es-da",
+        description="Dirección de traducción: es-da (Español→Danés) o da-es (Danés→Español)"
+    )
 
     class Config:
         json_schema_extra = {
-            "example": {
-                "text": ["Hola mundo", "¿Cómo estás?"],
-                "max_new_tokens": 256,
-                "glossary": {
-                    "Acme": "Acme",
-                    "Python": "Python"
+            "examples": [
+                {
+                    "text": "Hola, ¿cómo estás?",
+                    "direction": "es-da",
+                    "formal": False
+                },
+                {
+                    "text": "Hej, hvordan har du det?",
+                    "direction": "da-es",
+                    "formal": False
                 }
-            }
+            ]
         }
 
 
@@ -58,6 +66,7 @@ class TranslateResponse(BaseModel):
     
     Attributes:
         provider: Identificador del proveedor de traducción
+        direction: Dirección de traducción usada
         source: Código de idioma origen (FLORES-200)
         target: Código de idioma destino (FLORES-200)
         translations: Lista de textos traducidos
@@ -66,12 +75,16 @@ class TranslateResponse(BaseModel):
         default="nllb-ct2-int8",
         description="Proveedor/motor de traducción"
     )
+    direction: str = Field(
+        ...,
+        description="Dirección de traducción: es-da o da-es"
+    )
     source: str = Field(
-        default="spa_Latn",
+        ...,
         description="Código de idioma origen (FLORES-200)"
     )
     target: str = Field(
-        default="dan_Latn",
+        ...,
         description="Código de idioma destino (FLORES-200)"
     )
     translations: list[str] = Field(
@@ -123,16 +136,25 @@ class TranslateHTMLRequest(BaseModel):
         default=False,
         description="Aplicar estilo formal danés"
     )
+    direction: Literal["es-da", "da-es"] = Field(
+        default="es-da",
+        description="Dirección de traducción: es-da (Español→Danés) o da-es (Danés→Español)"
+    )
 
     class Config:
         json_schema_extra = {
-            "example": {
-                "html": "<p>Estimado cliente,</p><p>Gracias por contactar con <strong>Acme</strong>.</p>",
-                "max_new_tokens": 256,
-                "glossary": {
-                    "Acme": "Acme"
+            "examples": [
+                {
+                    "html": "<p>Estimado cliente,</p><p>Gracias por contactar con <strong>Acme</strong>.</p>",
+                    "direction": "es-da",
+                    "formal": True
+                },
+                {
+                    "html": "<p>Kære kunde,</p><p>Tak for at kontakte <strong>Acme</strong>.</p>",
+                    "direction": "da-es",
+                    "formal": False
                 }
-            }
+            ]
         }
 
 
@@ -142,6 +164,7 @@ class TranslateHTMLResponse(BaseModel):
     
     Attributes:
         provider: Identificador del proveedor de traducción
+        direction: Dirección de traducción usada
         source: Código de idioma origen (FLORES-200)
         target: Código de idioma destino (FLORES-200)
         html: HTML traducido
@@ -150,12 +173,16 @@ class TranslateHTMLResponse(BaseModel):
         default="nllb-ct2-int8",
         description="Proveedor/motor de traducción"
     )
+    direction: str = Field(
+        ...,
+        description="Dirección de traducción: es-da o da-es"
+    )
     source: str = Field(
-        default="spa_Latn",
+        ...,
         description="Código de idioma origen (FLORES-200)"
     )
     target: str = Field(
-        default="dan_Latn",
+        ...,
         description="Código de idioma destino (FLORES-200)"
     )
     html: str = Field(

@@ -38,6 +38,9 @@ const elements = {
     tabButtons: document.querySelectorAll('.tab-button'),
     tabContents: document.querySelectorAll('.tab-content'),
     
+    // Direction selector
+    directionSelect: document.getElementById('directionSelect'),
+    
     // Text tab
     sourceText: document.getElementById('sourceText'),
     targetText: document.getElementById('targetText'),
@@ -138,8 +141,31 @@ function initEventListeners() {
     
     elements.glossaryInput.addEventListener('change', saveSettings);
     
+    // Direction selector
+    elements.directionSelect.addEventListener('change', () => {
+        updatePlaceholders();
+        saveSettings();
+    });
+    
     // Translate button
     elements.translateBtn.addEventListener('click', translate);
+}
+
+/**
+ * Actualizar placeholders según dirección
+ */
+function updatePlaceholders() {
+    const direction = elements.directionSelect.value;
+    
+    if (direction === 'es-da') {
+        // Español → Danés
+        elements.sourceText.placeholder = 'Escribe o pega tu texto en español aquí...\n\nPuedes cargar archivos .txt usando el botón de arriba.';
+        elements.sourceHtml.placeholder = 'Pega el código HTML de tu correo en español aquí...\n\nEjemplo:\n<p>Estimado cliente,</p>\n<p>Gracias por contactarnos.</p>';
+    } else {
+        // Danés → Español
+        elements.sourceText.placeholder = 'Skriv eller indsæt din tekst på dansk her...\n\nDu kan indlæse .txt-filer ved hjælp af knappen ovenfor.';
+        elements.sourceHtml.placeholder = 'Indsæt HTML-koden fra din e-mail på dansk her...\n\nEksempel:\n<p>Kære kunde,</p>\n<p>Tak for at kontakte os.</p>';
+    }
 }
 
 /**
@@ -383,6 +409,8 @@ async function updateCacheStats() {
  * Traducir texto con timeout
  */
 async function translateText(text, maxNewTokens, glossary) {
+    const direction = elements.directionSelect.value;
+    
     const response = await fetchWithTimeout(`${state.apiUrl}/translate`, {
         method: 'POST',
         headers: {
@@ -390,6 +418,7 @@ async function translateText(text, maxNewTokens, glossary) {
         },
         body: JSON.stringify({
             text: text,
+            direction: direction,
             max_new_tokens: maxNewTokens,
             glossary: glossary
         }),
@@ -408,6 +437,8 @@ async function translateText(text, maxNewTokens, glossary) {
  * Traducir HTML con timeout
  */
 async function translateHTML(html, maxNewTokens, glossary) {
+    const direction = elements.directionSelect.value;
+    
     const response = await fetchWithTimeout(`${state.apiUrl}/translate/html`, {
         method: 'POST',
         headers: {
@@ -415,6 +446,7 @@ async function translateHTML(html, maxNewTokens, glossary) {
         },
         body: JSON.stringify({
             html: html,
+            direction: direction,
             max_new_tokens: maxNewTokens,
             glossary: glossary
         }),
@@ -515,7 +547,8 @@ function saveSettings() {
     const settings = {
         apiUrl: elements.apiUrl.value,
         maxTokens: elements.maxTokens.value,
-        glossary: elements.glossaryInput.value
+        glossary: elements.glossaryInput.value,
+        direction: elements.directionSelect.value
     };
     
     localStorage.setItem('translatorSettings', JSON.stringify(settings));
@@ -526,7 +559,10 @@ function saveSettings() {
  */
 function loadSettings() {
     const saved = localStorage.getItem('translatorSettings');
-    if (!saved) return;
+    if (!saved) {
+        updatePlaceholders();  // Inicializar placeholders
+        return;
+    }
     
     try {
         const settings = JSON.parse(saved);
@@ -544,8 +580,16 @@ function loadSettings() {
         if (settings.glossary) {
             elements.glossaryInput.value = settings.glossary;
         }
+        
+        if (settings.direction) {
+            elements.directionSelect.value = settings.direction;
+        }
+        
+        // Actualizar placeholders según dirección guardada
+        updatePlaceholders();
     } catch (error) {
         console.error('Error cargando configuración:', error);
+        updatePlaceholders();
     }
 }
 

@@ -12,6 +12,7 @@ from app.settings import settings
 from app.startup import model_manager
 from app.cache import translation_cache
 from app.postprocess_da import postprocess_da
+from app.postprocess_es import postprocess_es
 
 
 # Configuración de logging
@@ -24,31 +25,38 @@ logger = logging.getLogger(__name__)
 
 def translate_batch(
     texts: List[str],
+    direction: str = "es-da",
     max_new_tokens: int = None,
     beam_size: int = None,
     use_cache: bool = True,
     formal: bool = False
 ) -> List[str]:
     """
-    Traduce un batch de textos de español a danés.
+    Traduce un batch de textos entre español y danés (bidireccional).
     
-    Incluye caché LRU, post-procesado danés y validación de salida.
-    Garantiza que la salida sea en alfabeto latino (danés).
+    Incluye caché LRU, post-procesado y validación de salida.
+    Soporta ES→DA y DA→ES.
     
     Args:
-        texts: Lista de textos en español
+        texts: Lista de textos a traducir
+        direction: Dirección de traducción ("es-da" o "da-es")
         max_new_tokens: Máximo número de tokens a generar (default: settings.MAX_NEW_TOKENS)
         beam_size: Tamaño del beam search (default: settings.BEAM_SIZE)
         use_cache: Si True, usa caché para evitar retraducciones
-        formal: Si True, aplica estilo formal danés
+        formal: Si True, aplica estilo formal (solo para salida danesa)
         
     Returns:
-        Lista de traducciones en danés post-procesadas
+        Lista de traducciones post-procesadas
         
     Raises:
         RuntimeError: Si el modelo no está cargado
+        ValueError: Si direction es inválida
         Exception: Si hay error en la traducción
     """
+    # Validar dirección
+    if direction not in ["es-da", "da-es"]:
+        raise ValueError(f"Dirección inválida: {direction}. Usa 'es-da' o 'da-es'")
+    
     # Acceder al modelo via ModelManager
     if not model_manager.model_loaded:
         raise RuntimeError(
@@ -58,7 +66,6 @@ def translate_batch(
     
     translator = model_manager.translator
     tokenizer = model_manager.tokenizer
-    tgt_bos_tok = model_manager.tgt_bos_tok
     
     if not texts:
         return []
@@ -69,14 +76,34 @@ def translate_batch(
     if max_new_tokens is None:
         max_new_tokens = settings.MAX_NEW_TOKENS
     
-    # Separar textos en caché vs no caché
+    # Configurar idiomas según dirección
+    if direction == "es-da":
+        src_lang = "spa_Latn"
+        tgt_lang = "dan_Latn"
+    else:  # da-es
+        src_lang = "dan_Latn"
+        tgt_lang = "spa_Latn"
+    
+    # Obtener token BOS del idioma target
+    if not hasattr(tokenizer, 'lang_code_to_id'):
+        raise RuntimeError("Tokenizador no soporta lang_code_to_id (no es NLLB)")
+    
+    tgt_lang_id = tokenizer.lang_code_to_id.get(tgt_lang)
+    if tgt_lang_id is None:
+        raise RuntimeError(f"No se encontró token para idioma {tgt_lang}")
+    
+    tgt_bos_tok = tokenizer.convert_ids_to_tokens(tgt_lang_id)
+    
+    # Separar textos en caché vs no caché (con dirección)
     translations = [None] * len(texts)
     texts_to_translate = []
     indices_to_translate = []
     
     if use_cache:
         for i, text in enumerate(texts):
-            cached = translation_cache.get(text)
+            # Incluir dirección en la clave del caché
+            cache_key = f"{direction}||{text}"
+            cached = translation_cache.get(cache_key)
             if cached is not None:
                 translations[i] = cached
             else:
@@ -97,6 +124,11 @@ def translate_batch(
     try:
         # Pre-procesar textos: normalizar espacios
         texts_normalized = [_normalize_text(text) for text in texts_to_translate]
+        
+        # Configurar idioma source en el tokenizador
+        if hasattr(tokenizer, 'src_lang'):
+            tokenizer.src_lang = src_lang
+            logger.debug(f"Idioma source configurado: {src_lang}")
         
         # Tokenizar textos de entrada SIN TORCH (solo listas de IDs)
         # NLLB espera source language token al inicio
@@ -119,11 +151,11 @@ def translate_batch(
             for ids in input_ids_list
         ]
         
-        # Preparar target_prefix con token de idioma destino (DANÉS)
+        # Preparar target_prefix con token de idioma destino
         # NLLB requiere el token del idioma destino al inicio de la generación
         if not tgt_bos_tok:
             raise RuntimeError(
-                "Token de idioma danés no configurado. "
+                f"Token de idioma {tgt_lang} no configurado. "
                 "Verifica que el modelo NLLB esté correctamente cargado."
             )
         
@@ -182,14 +214,18 @@ def translate_batch(
                         f"Texto original: {texts_to_translate[i][:100]}..."
                     )
             
-            # Post-procesado danés
-            text = postprocess_da(text, formal=formal)
+            # Post-procesado según idioma destino
+            if direction == "es-da":
+                text = postprocess_da(text, formal=formal)
+            else:  # da-es
+                text = postprocess_es(text)
             
             new_translations.append(text)
             
-            # Guardar en caché
+            # Guardar en caché (con dirección)
             if use_cache:
-                translation_cache.put(texts_to_translate[i], text)
+                cache_key = f"{direction}||{texts_to_translate[i]}"
+                translation_cache.put(cache_key, text)
         
         # Insertar traducciones nuevas en las posiciones correctas
         for i, idx in enumerate(indices_to_translate):

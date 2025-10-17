@@ -275,7 +275,8 @@ def test_translate_html_endpoint(client):
     """Test del endpoint /translate/html."""
     payload = {
         "html": "<p>Hola <strong>mundo</strong></p>",
-        "max_new_tokens": 128
+        "max_new_tokens": 128,
+        "direction": "es-da"
     }
     
     response = client.post("/translate/html", json=payload)
@@ -284,6 +285,7 @@ def test_translate_html_endpoint(client):
     data = response.json()
     assert "html" in data
     assert data["provider"] == "nllb-ct2-int8"
+    assert data["direction"] == "es-da"
     assert data["source"] == "spa_Latn"
     assert data["target"] == "dan_Latn"
     
@@ -294,7 +296,75 @@ def test_translate_html_endpoint(client):
     # Verificar que preserva algunas etiquetas
     assert "<p>" in html or "<strong>" in html or "mundo" in html
     
-    print(f"\nHTML traducido: {html}")
+    print(f"\nHTML traducido ES→DA: {html}")
+
+
+def test_danish_to_spanish_simple(client):
+    """Test de traducción Danés→Español."""
+    payload = {
+        "text": "Hej verden",
+        "direction": "da-es"
+    }
+    
+    response = client.post("/translate", json=payload)
+    assert response.status_code == 200
+    
+    data = response.json()
+    assert data["direction"] == "da-es"
+    assert data["source"] == "dan_Latn"
+    assert data["target"] == "spa_Latn"
+    assert "translations" in data
+    assert len(data["translations"]) == 1
+    
+    translation = data["translations"][0]
+    assert len(translation.strip()) > 0
+    
+    # Verificar que contiene palabras españolas (aproximado)
+    print(f"\nTraducción DA→ES: 'Hej verden' → '{translation}'")
+
+
+def test_danish_to_spanish_question(client):
+    """Test DA→ES con pregunta."""
+    payload = {
+        "text": "Hvordan har du det?",
+        "direction": "da-es"
+    }
+    
+    response = client.post("/translate", json=payload)
+    assert response.status_code == 200
+    
+    data = response.json()
+    translation = data["translations"][0]
+    assert len(translation.strip()) > 0
+    
+    print(f"\nTraducción DA→ES: 'Hvordan har du det?' → '{translation}'")
+
+
+def test_bidirectional_consistency(client):
+    """Test de consistencia bidireccional."""
+    # ES→DA
+    payload_es_da = {
+        "text": "Buenos días",
+        "direction": "es-da"
+    }
+    response_es_da = client.post("/translate", json=payload_es_da)
+    assert response_es_da.status_code == 200
+    
+    # DA→ES
+    payload_da_es = {
+        "text": "Godmorgen",
+        "direction": "da-es"
+    }
+    response_da_es = client.post("/translate", json=payload_da_es)
+    assert response_da_es.status_code == 200
+    
+    # Ambas deben funcionar
+    assert len(response_es_da.json()["translations"][0]) > 0
+    assert len(response_da_es.json()["translations"][0]) > 0
+    
+    print(f"\nBidireccional OK:")
+    print(f"  ES→DA: 'Buenos días' → '{response_es_da.json()['translations'][0]}'")
+    print(f"  DA→ES: 'Godmorgen' → '{response_da_es.json()['translations'][0]}'")
 
 
 if __name__ == "__main__":

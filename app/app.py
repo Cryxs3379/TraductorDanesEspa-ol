@@ -268,12 +268,13 @@ async def translate(request: TranslateRequest):
                 for seg in all_segments
             ]
         
-        # Traducir con caché
+        # Traducir con caché y dirección
         if not settings.LOG_TRANSLATIONS:
-            logger.info(f"Traduciendo {len(all_segments)} segmento(s)...")
+            logger.info(f"Traduciendo {len(all_segments)} segmento(s) [{request.direction}]...")
         
         segment_translations = translate_batch(
             all_segments,
+            direction=request.direction,
             max_new_tokens=request.max_new_tokens,
             use_cache=True,
             formal=request.formal or settings.FORMAL_DA
@@ -310,11 +311,18 @@ async def translate(request: TranslateRequest):
             stats = translation_cache.stats()
             logger.info(f"  Caché: {stats['hit_rate']} ({stats['hits']} hits, {stats['misses']} misses)")
         
+        # Determinar idiomas según dirección
+        if request.direction == "es-da":
+            source_lang, target_lang = "spa_Latn", "dan_Latn"
+        else:  # da-es
+            source_lang, target_lang = "dan_Latn", "spa_Latn"
+        
         # Construir respuesta
         response = TranslateResponse(
             provider="nllb-ct2-int8",
-            source="spa_Latn",
-            target="dan_Latn",
+            direction=request.direction,
+            source=source_lang,
+            target=target_lang,
             translations=translations
         )
         
@@ -409,9 +417,10 @@ async def translate_html_endpoint(request: TranslateHTMLRequest):
                 for t in texts_to_translate
             ]
         
-        # Traducir con caché y post-procesado
+        # Traducir con caché, post-procesado y dirección
         translated_texts = translate_batch(
             texts_to_translate,
+            direction=request.direction,
             max_new_tokens=request.max_new_tokens,
             use_cache=True,
             formal=request.formal or settings.FORMAL_DA
@@ -435,11 +444,18 @@ async def translate_html_endpoint(request: TranslateHTMLRequest):
             stats = translation_cache.stats()
             logger.info(f"  Caché: {stats['hit_rate']} ({stats['hits']} hits)")
         
+        # Determinar idiomas según dirección
+        if request.direction == "es-da":
+            source_lang, target_lang = "spa_Latn", "dan_Latn"
+        else:  # da-es
+            source_lang, target_lang = "dan_Latn", "spa_Latn"
+        
         # Construir respuesta
         response = TranslateHTMLResponse(
             provider="nllb-ct2-int8",
-            source="spa_Latn",
-            target="dan_Latn",
+            direction=request.direction,
+            source=source_lang,
+            target=target_lang,
             html=html_translated
         )
         
@@ -482,8 +498,10 @@ async def info():
             "load_time_ms": health_info["load_time_ms"]
         },
         "capabilities": {
-            "source_languages": ["spa_Latn"],
-            "target_languages": ["dan_Latn"],
+            "supported_directions": ["es-da", "da-es"],
+            "source_languages": ["spa_Latn", "dan_Latn"],
+            "target_languages": ["dan_Latn", "spa_Latn"],
+            "bidirectional": True,
             "supports_glossary": True,
             "supports_batch": True,
             "supports_html": True,
