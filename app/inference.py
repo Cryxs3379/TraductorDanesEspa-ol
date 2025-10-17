@@ -1,120 +1,22 @@
 """
 Motor de inferencia usando CTranslate2 para traducción NLLB.
 
-Carga el modelo convertido a CT2 con cuantización INT8 y el tokenizador HuggingFace.
-Proporciona funciones de traducción batch con configuración optimizada.
-
-Garantiza traducción determinística ES→DA forzando idioma destino.
+Usa ModelManager para acceso al modelo y garantiza traducción determinística ES→DA.
 """
-import os
 import re
 import logging
-from typing import List, Optional
-from functools import lru_cache
-import hashlib
+from typing import List
 
-import ctranslate2 as ct
-from transformers import AutoTokenizer
+from app.settings import settings
+from app.startup import model_manager
 
 
 # Configuración de logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Variables globales para modelo y tokenizador (carga única)
-translator: Optional[ct.Translator] = None
-tokenizer: Optional[AutoTokenizer] = None
-target_lang_token: Optional[str] = None
-target_lang_id: Optional[int] = None
 
-# Configuración desde variables de entorno
-MODEL_DIR = os.getenv("MODEL_DIR", "./models/nllb-600m")
-CT2_DIR = os.getenv("CT2_DIR", "./models/nllb-600m-ct2-int8")
-CT2_INTER_THREADS = int(os.getenv("CT2_INTER_THREADS", "0"))
-CT2_INTRA_THREADS = int(os.getenv("CT2_INTRA_THREADS", "0"))
-BEAM_SIZE = int(os.getenv("BEAM_SIZE", "4"))
-
-# Idiomas FLORES-200
-SOURCE_LANG = "spa_Latn"
-TARGET_LANG = "dan_Latn"
-
-
-def load_model():
-    """
-    Carga el modelo CTranslate2 y tokenizador HuggingFace.
-    
-    Esta función se ejecuta una sola vez al iniciar la aplicación.
-    
-    Raises:
-        FileNotFoundError: Si los directorios de modelo no existen
-        Exception: Si hay error al cargar modelo o tokenizador
-    """
-    global translator, tokenizer, target_lang_token, target_lang_id
-    
-    logger.info(f"Cargando modelo desde {CT2_DIR}...")
-    logger.info(f"Tokenizador desde {MODEL_DIR}...")
-    
-    # Verificar que existen los directorios
-    if not os.path.exists(CT2_DIR):
-        raise FileNotFoundError(
-            f"Directorio de modelo CT2 no encontrado: {CT2_DIR}\n"
-            f"Ejecuta: make download && make convert"
-        )
-    
-    if not os.path.exists(MODEL_DIR):
-        raise FileNotFoundError(
-            f"Directorio de modelo HF no encontrado: {MODEL_DIR}\n"
-            f"Ejecuta: make download"
-        )
-    
-    try:
-        # Cargar traductor CTranslate2
-        translator = ct.Translator(
-            CT2_DIR,
-            device="cpu",
-            inter_threads=CT2_INTER_THREADS if CT2_INTER_THREADS > 0 else 0,
-            intra_threads=CT2_INTRA_THREADS if CT2_INTRA_THREADS > 0 else 0,
-            compute_type="int8"
-        )
-        logger.info("✓ Traductor CTranslate2 cargado")
-        
-        # Cargar tokenizador HuggingFace
-        tokenizer = AutoTokenizer.from_pretrained(MODEL_DIR)
-        
-        # CRÍTICO: Forzar idioma source para NLLB
-        # Esto garantiza que el tokenizador añada el token correcto de español al inicio
-        if hasattr(tokenizer, 'src_lang'):
-            tokenizer.src_lang = SOURCE_LANG
-            logger.info(f"✓ Idioma source configurado: {SOURCE_LANG}")
-        
-        logger.info("✓ Tokenizador HuggingFace cargado")
-        
-        # Obtener token de idioma destino para NLLB
-        if hasattr(tokenizer, 'lang_code_to_id'):
-            target_lang_id = tokenizer.lang_code_to_id.get(TARGET_LANG)
-            if target_lang_id is not None:
-                target_lang_token = tokenizer.convert_ids_to_tokens(target_lang_id)
-                logger.info(f"✓ Token de idioma destino: {target_lang_token} (ID: {target_lang_id})")
-            else:
-                logger.warning(f"No se encontró ID para idioma {TARGET_LANG}")
-                raise ValueError(f"No se pudo obtener token para {TARGET_LANG}")
-        else:
-            logger.warning("El tokenizador no tiene lang_code_to_id")
-            raise ValueError("El tokenizador no soporta NLLB lang_code_to_id")
-        
-        # Warmup: traducción de prueba
-        logger.info("Ejecutando warmup...")
-        try:
-            warmup_text = ["Hola mundo"]
-            _ = translate_batch(warmup_text, max_new_tokens=20)
-            logger.info("✓ Warmup completado - Sistema listo")
-        except Exception as e:
-            logger.warning(f"Warmup falló, pero el modelo está cargado: {e}")
-            logger.info("✓ Modelo cargado - Sistema listo")
-        
-    except Exception as e:
-        logger.error(f"Error al cargar modelo: {e}")
-        raise
+# Nota: load_model() ahora está en ModelManager (app/startup.py)
 
 
 def translate_batch(
@@ -131,7 +33,7 @@ def translate_batch(
     Args:
         texts: Lista de textos en español
         max_new_tokens: Máximo número de tokens a generar
-        beam_size: Tamaño del beam search (default: usa BEAM_SIZE de env)
+        beam_size: Tamaño del beam search (default: usa settings.BEAM_SIZE)
         
     Returns:
         Lista de traducciones en danés
@@ -140,19 +42,23 @@ def translate_batch(
         RuntimeError: Si el modelo no está cargado
         Exception: Si hay error en la traducción
     """
-    global translator, tokenizer, target_lang_token
-    
-    if translator is None or tokenizer is None:
+    # Acceder al modelo via ModelManager
+    if not model_manager.model_loaded:
         raise RuntimeError(
-            "Modelo no cargado. Ejecuta load_model() primero."
+            "Modelo no cargado. El servidor arrancó pero el modelo no está disponible. "
+            "Revisa /health para diagnóstico."
         )
+    
+    translator = model_manager.translator
+    tokenizer = model_manager.tokenizer
+    tgt_bos_tok = model_manager.tgt_bos_tok
     
     if not texts:
         return []
     
-    # Usar beam_size por defecto de env si no se especifica
+    # Usar beam_size por defecto de settings si no se especifica
     if beam_size is None:
-        beam_size = BEAM_SIZE
+        beam_size = settings.BEAM_SIZE
     
     try:
         # Pre-procesar textos: normalizar espacios
@@ -177,12 +83,7 @@ def translate_batch(
         
         # Preparar target_prefix con token de idioma destino
         # NLLB requiere el token del idioma destino al inicio de la generación
-        target_prefix = None
-        if target_lang_token:
-            # Cada elemento del batch necesita el mismo prefix
-            target_prefix = [[target_lang_token]] * len(texts)
-        else:
-            raise RuntimeError("Token de idioma destino no configurado")
+        target_prefix = [[tgt_bos_tok]] * len(texts)
         
         # Traducir con CTranslate2
         results = translator.translate_batch(
@@ -214,7 +115,7 @@ def translate_batch(
             text = _clean_translation(text)
             
             # Validación: verificar que la salida es alfabeto latino
-            if not _validate_latin_output(text):
+            if not is_mostly_latin(text):
                 logger.warning(
                     f"Salida con caracteres no latinos detectada (texto {i+1}). "
                     f"Reintentando con beam_size={beam_size + 1}..."
@@ -275,12 +176,15 @@ def _clean_translation(text: str) -> str:
     return text
 
 
-def _validate_latin_output(text: str) -> bool:
+def is_mostly_latin(text: str) -> bool:
     """
-    Valida que la salida contenga principalmente caracteres del alfabeto latino.
+    Valida que el texto contenga principalmente caracteres del alfabeto latino.
     
     Permite letras latinas (incluyendo danesas: æ, ø, å), números, 
     puntuación común y algunos símbolos.
+    
+    Args:
+        text: Texto a validar
     
     Returns:
         True si >80% son caracteres latinos válidos, False en caso contrario
@@ -290,7 +194,9 @@ def _validate_latin_output(text: str) -> bool:
     
     # Caracteres permitidos: latinos, daneses, números, puntuación, espacios
     # Incluye: a-z, A-Z, æøåÆØÅ, números, puntuación común, espacios
-    latin_pattern = re.compile(r'[a-zA-ZæøåÆØÅàáâãäåèéêëìíîïòóôõöùúûüýÿñçÀÁÂÃÄÅÈÉÊËÌÍÎÏÒÓÔÕÖÙÚÛÜÝŸÑÇ0-9\s\.,;:!?¿¡\-\'\"()\[\]{}/@#$%&*+=<>|\\~`]')
+    latin_pattern = re.compile(
+        r'[a-zA-ZæøåÆØÅàáâãäåèéêëìíîïòóôõöùúûüýÿñçÀÁÂÃÄÅÈÉÊËÌÍÎÏÒÓÔÕÖÙÚÛÜÝŸÑÇ0-9\s\.,;:!?¿¡\-\'\"()\[\]{}/@#$%&*+=<>|\\~`]'
+    )
     
     # Contar caracteres latinos vs total
     latin_chars = len(latin_pattern.findall(text))
@@ -312,21 +218,5 @@ def _validate_latin_output(text: str) -> bool:
     return True
 
 
-def get_model_info() -> dict:
-    """
-    Retorna información sobre el modelo cargado.
-    
-    Returns:
-        Diccionario con información del modelo
-    """
-    return {
-        "model_dir": MODEL_DIR,
-        "ct2_dir": CT2_DIR,
-        "source_lang": SOURCE_LANG,
-        "target_lang": TARGET_LANG,
-        "loaded": translator is not None and tokenizer is not None,
-        "inter_threads": CT2_INTER_THREADS,
-        "intra_threads": CT2_INTRA_THREADS,
-        "beam_size": BEAM_SIZE
-    }
+# Nota: get_model_info() ahora está en ModelManager.health() (app/startup.py)
 

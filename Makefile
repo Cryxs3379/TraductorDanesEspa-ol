@@ -91,14 +91,12 @@ convert: ## Convertir modelo a CTranslate2 INT8
 	@bash scripts/convert_to_ct2.sh --in $(MODEL_DIR) --out $(CT2_DIR)
 
 .PHONY: run
-run: ## Ejecutar servidor FastAPI local
+run: ## Ejecutar servidor FastAPI local (con auto-detección de puerto)
 	@echo "Iniciando servidor FastAPI..."
-	@echo "Accede a: http://localhost:8000"
-	@echo "Docs: http://localhost:8000/docs"
 	@if [ -d "$(VENV)" ]; then \
-		$(VENV_BIN)/uvicorn app.app:app --host 0.0.0.0 --port 8000 --reload; \
+		$(PYTHON_VENV) start_server.py; \
 	else \
-		uvicorn app.app:app --host 0.0.0.0 --port 8000 --reload; \
+		$(PYTHON) start_server.py; \
 	fi
 
 .PHONY: test
@@ -181,34 +179,17 @@ curl-test: ## Test rápido con curl
 		-d '{"text": "Hola mundo", "max_new_tokens": 128}' \
 		| python -m json.tool
 
-.PHONY: info
-info: ## Mostrar configuración actual
-	@echo "======================================================================"
-	@echo "Configuración actual"
-	@echo "======================================================================"
-	@echo "Modelo: $(MODEL_NAME)"
-	@echo "Directorio HF: $(MODEL_DIR)"
-	@echo "Directorio CT2: $(CT2_DIR)"
-	@echo "Python: $(PYTHON)"
-	@echo "Venv: $(VENV)"
-	@echo ""
-	@echo "Estado:"
-	@if [ -d "$(MODEL_DIR)" ]; then \
-		echo "  ✓ Modelo HF descargado: $(MODEL_DIR)"; \
-	else \
-		echo "  ✗ Modelo HF NO descargado (ejecuta: make download)"; \
-	fi
-	@if [ -d "$(CT2_DIR)" ]; then \
-		echo "  ✓ Modelo CT2 convertido: $(CT2_DIR)"; \
-	else \
-		echo "  ✗ Modelo CT2 NO convertido (ejecuta: make convert)"; \
-	fi
+.PHONY: preflight
+preflight: ## Ejecutar verificación de entorno (preflight check)
+	@echo "Ejecutando preflight check..."
 	@if [ -d "$(VENV)" ]; then \
-		echo "  ✓ Entorno virtual creado"; \
+		$(PYTHON_VENV) scripts/preflight.py; \
 	else \
-		echo "  ✗ Entorno virtual NO creado (ejecuta: make venv)"; \
+		$(PYTHON) scripts/preflight.py; \
 	fi
-	@echo "======================================================================"
+
+.PHONY: info
+info: preflight ## Mostrar configuración actual y estado del sistema
 
 .DEFAULT_GOAL := help
 

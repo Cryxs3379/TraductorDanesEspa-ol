@@ -1,42 +1,65 @@
-"""Script para iniciar el servidor con mejor manejo de errores"""
+#!/usr/bin/env python3
+"""
+Script de arranque del servidor con detección automática de puerto libre.
+
+Intenta usar el puerto configurado (default 8000). Si está ocupado,
+busca el siguiente puerto libre automáticamente.
+"""
 import os
 import sys
+import uvicorn
 
-# Configurar variables de entorno
-os.environ["MODEL_DIR"] = "./models/nllb-600m"
-os.environ["CT2_DIR"] = "./models/nllb-600m-ct2-int8"
+# Añadir directorio actual al path para imports
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-print("=" * 70)
-print("Iniciando servidor de traduccion ES->DA")
-print("=" * 70)
-print(f"Python: {sys.version}")
-print(f"MODEL_DIR: {os.environ['MODEL_DIR']}")
-print(f"CT2_DIR: {os.environ['CT2_DIR']}")
-print("=" * 70)
-print()
+from app.settings import settings, pick_free_port
 
-try:
-    import uvicorn
-    print("✓ uvicorn importado")
+
+def main():
+    """Función principal."""
+    print("=" * 70)
+    print("Iniciando Traductor ES→DA")
+    print("=" * 70)
     
-    from app.app import app
-    print("✓ app importada")
+    # Encontrar puerto libre
+    try:
+        port = pick_free_port(settings.PORT)
+    except RuntimeError as e:
+        print(f"✗ Error: {e}")
+        print("   No se pudo encontrar un puerto libre")
+        return 1
     
+    print(f"Puerto: {port}")
+    print(f"Host: {settings.HOST}")
+    print("=" * 70)
     print()
-    print("Iniciando servidor en http://localhost:8000")
-    print("Presiona Ctrl+C para detener")
+    print(f"🌐 API disponible en: http://localhost:{port}")
+    print(f"📚 Documentación: http://localhost:{port}/docs")
+    print(f"❤️  Health check: http://localhost:{port}/health")
+    print()
+    print("Presiona Ctrl+C para detener el servidor")
     print("=" * 70)
     print()
     
-    uvicorn.run(app, host="0.0.0.0", port=8000)
-    
-except Exception as e:
-    print()
-    print("=" * 70)
-    print("ERROR al iniciar el servidor:")
-    print("=" * 70)
-    print(f"{type(e).__name__}: {e}")
-    import traceback
-    traceback.print_exc()
-    sys.exit(1)
+    # Iniciar servidor
+    try:
+        uvicorn.run(
+            "app.app:app",
+            host=settings.HOST,
+            port=port,
+            reload=False,
+            log_level="info",
+            access_log=not settings.LOG_TRANSLATIONS  # Desactivar si no queremos logs de acceso
+        )
+    except KeyboardInterrupt:
+        print("\n\n" + "=" * 70)
+        print("Servidor detenido")
+        print("=" * 70)
+        return 0
+    except Exception as e:
+        print(f"\n✗ Error al iniciar servidor: {e}")
+        return 1
 
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,24 +1,25 @@
 """
 API REST de traducción Español → Danés usando NLLB + CTranslate2.
 
-Servicio 100% local, gratuito y privado.
+Servicio 100% local, gratuito y privado con arranque resiliente.
 """
-import os
 import logging
+import threading
 from contextlib import asynccontextmanager
 from typing import Union
 
 from fastapi import FastAPI, HTTPException, status
 from fastapi.responses import JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
 
+from app.settings import settings
+from app.startup import model_manager
 from app.schemas import (
     TranslateRequest, 
     TranslateResponse,
     TranslateHTMLRequest,
     TranslateHTMLResponse
 )
-from app.inference import load_model, translate_batch, get_model_info
+from app.inference import translate_batch
 from app.glossary import apply_glossary_pre, apply_glossary_post
 from app.email_html import translate_html, sanitize_html
 
@@ -35,30 +36,48 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """
     Gestión del ciclo de vida de la aplicación.
-    Carga el modelo al inicio y libera recursos al finalizar.
-    """
-    logger.info("Iniciando aplicación...")
-    logger.info("=" * 60)
     
-    try:
-        # Cargar modelo al inicio
-        load_model()
-        logger.info("✓ Modelo cargado exitosamente")
-        logger.info("=" * 60)
+    Carga el modelo en un hilo separado para no bloquear el arranque del servidor.
+    La API estará disponible inmediatamente, reportando estado vía /health.
+    """
+    logger.info("=" * 70)
+    logger.info("Iniciando API de traducción ES → DA")
+    logger.info("=" * 70)
+    
+    # 1. Verificar rutas (rápido, no bloquea)
+    logger.info("Verificando rutas del modelo...")
+    probe_result = model_manager.probe_paths()
+    
+    if not probe_result["all_ok"]:
+        logger.warning("⚠️  Modelo no disponible")
+        logger.warning("La API arrancará de todos modos.")
+        logger.warning("Consulta /health para más detalles")
+    
+    # 2. Cargar modelo en hilo separado (para no bloquear)
+    if probe_result["all_ok"]:
+        logger.info("Cargando modelo en segundo plano...")
         
-        # Mostrar información del modelo
-        info = get_model_info()
-        logger.info(f"Modelo HF: {info['model_dir']}")
-        logger.info(f"Modelo CT2: {info['ct2_dir']}")
-        logger.info(f"Idiomas: {info['source_lang']} → {info['target_lang']}")
-        logger.info("=" * 60)
+        def load_in_background():
+            """Carga el modelo sin bloquear el arranque."""
+            success = model_manager.load()
+            if success:
+                logger.info("✓ Modelo listo para usar")
+            else:
+                logger.error("✗ Fallo al cargar modelo (consulta /health)")
         
-    except Exception as e:
-        logger.error(f"✗ Error al cargar modelo: {e}")
-        logger.error("Asegúrate de haber ejecutado:")
-        logger.error("  1. make download")
-        logger.error("  2. make convert")
-        raise
+        loading_thread = threading.Thread(target=load_in_background, daemon=True)
+        loading_thread.start()
+        
+        logger.info("✓ Servidor arrancando (modelo cargando en paralelo)")
+    else:
+        logger.warning("✗ Modelo no se cargará automáticamente")
+        logger.warning(f"   Razón: {model_manager.last_error}")
+    
+    logger.info("=" * 70)
+    logger.info(f"API disponible en http://{settings.HOST}:{settings.PORT}")
+    logger.info(f"Documentación: http://{settings.HOST}:{settings.PORT}/docs")
+    logger.info(f"Health check: http://{settings.HOST}:{settings.PORT}/health")
+    logger.info("=" * 70)
     
     yield
     
@@ -86,54 +105,58 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-# Configurar CORS para permitir acceso desde UI local
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # En producción, especificar dominios exactos
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# CORS desactivado por defecto (seguridad)
+# Descomentar solo si necesitas acceso desde UI local
+# from fastapi.middleware.cors import CORSMiddleware
+# app.add_middleware(
+#     CORSMiddleware,
+#     allow_origins=["http://localhost:*", "file://"],
+#     allow_credentials=True,
+#     allow_methods=["*"],
+#     allow_headers=["*"],
+# )
 
 
 @app.get("/")
 async def root():
     """Endpoint raíz con información del servicio."""
-    info = get_model_info()
+    health_info = model_manager.health()
+    
     return {
         "service": "Traductor ES → DA",
         "provider": "nllb-ct2-int8",
-        "status": "online" if info["loaded"] else "offline",
-        "model": {
-            "source_lang": info["source_lang"],
-            "target_lang": info["target_lang"],
-            "model_dir": info["model_dir"],
-            "ct2_dir": info["ct2_dir"]
-        },
+        "status": "ready" if health_info["model_loaded"] else "starting",
+        "model_loaded": health_info["model_loaded"],
         "endpoints": {
             "translate": "/translate (POST) - Traducir texto simple o batch",
             "translate_html": "/translate/html (POST) - Traducir HTML de correos",
-            "health": "/health (GET) - Health check",
+            "health": "/health (GET) - Health check detallado",
             "info": "/info (GET) - Información del modelo",
             "docs": "/docs - Documentación interactiva"
-        }
+        },
+        "help": "Si model_loaded=false, consulta /health para diagnóstico"
     }
 
 
 @app.get("/health")
 async def health():
-    """Endpoint de health check."""
-    info = get_model_info()
+    """
+    Endpoint de health check.
     
-    if not info["loaded"]:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Modelo no cargado"
-        )
+    SIEMPRE responde 200, incluso si el modelo no está cargado.
+    Usa el campo 'model_loaded' para verificar si el modelo está disponible.
+    """
+    health_info = model_manager.health()
     
+    # Siempre 200 - el servidor está vivo
     return {
-        "status": "healthy",
-        "model_loaded": True
+        "status": "healthy",  # API está viva
+        "model_loaded": health_info["model_loaded"],
+        "ready_for_translation": health_info["model_loaded"],
+        "last_error": health_info["last_error"],
+        "paths": health_info["paths"],
+        "config": health_info["config"],
+        "load_time_ms": health_info["load_time_ms"]
     }
 
 
@@ -172,6 +195,18 @@ async def translate(request: TranslateRequest):
     - `target`: Código de idioma destino (dan_Latn)
     - `translations`: Lista de traducciones
     """
+    # Verificar que el modelo esté cargado
+    if not model_manager.model_loaded:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Modelo no cargado. "
+                "Revisa /health para diagnóstico. "
+                "Si los modelos no están descargados, ejecuta: "
+                "make download && make convert"
+            )
+        )
+    
     try:
         # Normalizar input: siempre trabajar con lista
         texts_to_translate = (
@@ -186,15 +221,17 @@ async def translate(request: TranslateRequest):
         
         # Aplicar glosario pre-traducción si existe
         if request.glossary:
-            logger.info(f"Aplicando glosario con {len(request.glossary)} términos")
+            if not settings.LOG_TRANSLATIONS:
+                logger.info(f"Aplicando glosario con {len(request.glossary)} términos")
             texts_to_translate = [
                 apply_glossary_pre(text, request.glossary)
                 for text in texts_to_translate
             ]
-            logger.debug(f"Textos con glosario aplicado: {texts_to_translate}")
         
         # Traducir
-        logger.info(f"Traduciendo {len(texts_to_translate)} texto(s)...")
+        if not settings.LOG_TRANSLATIONS:
+            logger.info(f"Traduciendo {len(texts_to_translate)} texto(s)...")
+        
         translations = translate_batch(
             texts_to_translate,
             max_new_tokens=request.max_new_tokens
@@ -206,9 +243,9 @@ async def translate(request: TranslateRequest):
                 apply_glossary_post(text, request.glossary)
                 for text in translations
             ]
-            logger.debug(f"Traducciones con glosario post: {translations}")
         
-        logger.info(f"✓ Traducción completada exitosamente")
+        if not settings.LOG_TRANSLATIONS:
+            logger.info(f"✓ Traducción completada exitosamente")
         
         # Construir respuesta
         response = TranslateResponse(
@@ -256,6 +293,18 @@ async def translate_html_endpoint(request: TranslateHTMLRequest):
     - `target`: Código de idioma destino (dan_Latn)
     - `html`: HTML traducido con estructura preservada
     """
+    # Verificar que el modelo esté cargado
+    if not model_manager.model_loaded:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Modelo no cargado. "
+                "Revisa /health para diagnóstico. "
+                "Si los modelos no están descargados, ejecuta: "
+                "make download && make convert"
+            )
+        )
+    
     try:
         if not request.html or not request.html.strip():
             raise HTTPException(
@@ -266,7 +315,8 @@ async def translate_html_endpoint(request: TranslateHTMLRequest):
         # Sanitizar HTML de entrada (seguridad)
         html_clean = sanitize_html(request.html)
         
-        logger.info(f"Traduciendo HTML ({len(html_clean)} caracteres)...")
+        if not settings.LOG_TRANSLATIONS:
+            logger.info(f"Traduciendo HTML ({len(html_clean)} caracteres)...")
         
         # Función de traducción wrapper que aplica glosario
         def translate_with_glossary(texts: list[str]) -> list[str]:
@@ -291,7 +341,8 @@ async def translate_html_endpoint(request: TranslateHTMLRequest):
             max_new_tokens=request.max_new_tokens
         )
         
-        logger.info("✓ HTML traducido exitosamente")
+        if not settings.LOG_TRANSLATIONS:
+            logger.info("✓ HTML traducido exitosamente")
         
         # Construir respuesta
         response = TranslateHTMLResponse(
@@ -316,16 +367,22 @@ async def translate_html_endpoint(request: TranslateHTMLRequest):
 @app.get("/info")
 async def info():
     """Devuelve información detallada del modelo cargado."""
-    model_info = get_model_info()
+    health_info = model_manager.health()
+    
     return {
-        "model": model_info,
+        "model": {
+            "loaded": health_info["model_loaded"],
+            "paths": health_info["paths"],
+            "config": health_info["config"],
+            "load_time_ms": health_info["load_time_ms"]
+        },
         "capabilities": {
             "source_languages": ["spa_Latn"],
             "target_languages": ["dan_Latn"],
             "supports_glossary": True,
             "supports_batch": True,
             "supports_html": True,
-            "max_batch_size": 32,
+            "max_batch_size": settings.MAX_BATCH_SIZE,
             "max_tokens_per_translation": 512
         }
     }
@@ -347,12 +404,18 @@ async def global_exception_handler(request, exc):
 
 if __name__ == "__main__":
     import uvicorn
+    from app.settings import pick_free_port
+    
+    # Encontrar puerto libre
+    port = pick_free_port(settings.PORT)
+    
+    logger.info(f"Iniciando servidor en {settings.HOST}:{port}")
     
     # Configuración para desarrollo
     uvicorn.run(
         "app.app:app",
-        host="0.0.0.0",
-        port=8000,
+        host=settings.HOST,
+        port=port,
         reload=False,  # Reload complica la carga del modelo
         log_level="info"
     )
