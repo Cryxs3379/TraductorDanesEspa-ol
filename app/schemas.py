@@ -20,11 +20,15 @@ class TranslateRequest(BaseModel):
         ...,
         description="Texto o lista de textos en español a traducir"
     )
-    max_new_tokens: int = Field(
-        default=256,
+    max_new_tokens: Optional[int] = Field(
+        default=None,
         ge=32,
         le=512,
-        description="Número máximo de tokens a generar por traducción"
+        description="Número máximo de tokens a generar (None = auto-calculado por el servidor)"
+    )
+    strict_max: bool = Field(
+        default=False,
+        description="Si True, NO elevar max_new_tokens en el servidor; usar valor exacto del cliente"
     )
     glossary: Optional[dict[str, str]] = Field(
         default=None,
@@ -118,11 +122,15 @@ class TranslateHTMLRequest(BaseModel):
         ...,
         description="Contenido HTML del correo electrónico a traducir"
     )
-    max_new_tokens: int = Field(
-        default=256,
+    max_new_tokens: Optional[int] = Field(
+        default=None,
         ge=32,
         le=512,
-        description="Número máximo de tokens a generar por bloque"
+        description="Número máximo de tokens a generar por bloque (None = auto-calculado)"
+    )
+    strict_max: bool = Field(
+        default=False,
+        description="Si True, NO elevar max_new_tokens en el servidor; usar valor exacto del cliente"
     )
     glossary: Optional[dict[str, str]] = Field(
         default=None,

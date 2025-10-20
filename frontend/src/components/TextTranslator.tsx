@@ -4,6 +4,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { GlossaryPanel } from './GlossaryPanel'
 import { CopyButtons } from './CopyButtons'
 import { useTranslate } from '@/hooks/useTranslate'
@@ -17,6 +18,12 @@ export function TextTranslator() {
   const formal = useAppStore((state) => state.formal)
   const setFormal = useAppStore((state) => state.setFormal)
   const health = useAppStore((state) => state.health)
+  const maxTokensMode = useAppStore((state) => state.maxTokensMode)
+  const setMaxTokensMode = useAppStore((state) => state.setMaxTokensMode)
+  const maxNewTokens = useAppStore((state) => state.maxNewTokens)
+  const setMaxNewTokens = useAppStore((state) => state.setMaxNewTokens)
+  const strictMax = useAppStore((state) => state.strictMax)
+  const setStrictMax = useAppStore((state) => state.setStrictMax)
 
   const { translate, isLoading } = useTranslate('text')
 
@@ -66,22 +73,50 @@ export function TextTranslator() {
             {direction === 'es-da' ? '🇪🇸 Español' : '🇩🇰 Danés'}
           </Label>
           <div className="flex items-center gap-4">
-            {/* Control de Max Tokens */}
+            {/* Control de Tokens: Auto/Manual */}
             <div className="flex items-center gap-2">
-              <Label htmlFor="max-tokens" className="text-sm">
-                Max tokens:
+              <Label htmlFor="tokens-mode" className="text-sm">
+                Tokens:
               </Label>
-              <input
-                id="max-tokens"
-                type="number"
-                min={32}
-                max={512}
-                step={16}
-                value={useAppStore((s) => s.maxNewTokens)}
-                onChange={(e) => useAppStore.getState().setMaxNewTokens(parseInt(e.target.value || '256', 10))}
-                className="w-20 rounded-md border border-input bg-background px-2 py-1 text-sm"
-              />
+              <Select value={maxTokensMode} onValueChange={setMaxTokensMode}>
+                <SelectTrigger id="tokens-mode" className="w-28">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="auto">Auto</SelectItem>
+                  <SelectItem value="manual">Manual</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
+
+            {/* Controles manuales (solo si mode=manual) */}
+            {maxTokensMode === 'manual' && (
+              <>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={32}
+                    max={512}
+                    step={16}
+                    value={maxNewTokens}
+                    onChange={(e) => setMaxNewTokens(parseInt(e.target.value || '256', 10))}
+                    className="w-20 rounded-md border border-input bg-background px-2 py-1 text-sm"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="strict-max"
+                    checked={strictMax}
+                    onChange={(e) => setStrictMax(e.target.checked)}
+                    className="h-4 w-4 rounded border-border"
+                  />
+                  <Label htmlFor="strict-max" className="text-xs cursor-pointer">
+                    Estricto
+                  </Label>
+                </div>
+              </>
+            )}
             
             {/* Switch formal solo visible para ES→DA */}
             {direction === 'es-da' && (
@@ -98,6 +133,15 @@ export function TextTranslator() {
             )}
             <GlossaryPanel />
           </div>
+        </div>
+
+        {/* Tooltip de ayuda para tokens */}
+        <div className="text-xs text-muted-foreground">
+          {maxTokensMode === 'auto' 
+            ? 'El servidor calcula automáticamente el límite según la longitud del texto'
+            : strictMax
+              ? 'Usar exactamente el valor especificado (puede truncar)'
+              : 'El servidor puede elevar el valor para evitar truncado'}
         </div>
 
         <Textarea

@@ -249,17 +249,22 @@ async def translate(request: TranslateRequest):
                 detail="El campo 'text' no puede estar vacío"
             )
         
-        # Segmentar textos largos automáticamente
-        # Usar max_segment_chars más grande para evitar truncado
+        # Segmentar textos largos automáticamente SOLO si es necesario
         all_segments = []
         segment_map = []  # Para reconstruir después
         
         for idx, text in enumerate(texts_to_translate):
-            # Usar max_segment_chars mayor (800) para reducir número de segmentos
-            # y evitar traducciones cortadas
-            segments = split_text_for_email(text, max_segment_chars=settings.MAX_SEGMENT_CHARS)
-            for seg in segments:
-                all_segments.append(seg)
+            # Solo segmentar si el texto es muy largo (más de 1500 caracteres)
+            # o si se acerca al límite de tokens
+            if len(text) > settings.MAX_SEGMENT_CHARS:
+                # Texto largo: segmentar
+                segments = split_text_for_email(text, max_segment_chars=settings.MAX_SEGMENT_CHARS)
+                for seg in segments:
+                    all_segments.append(seg)
+                    segment_map.append(idx)
+            else:
+                # Texto corto: traducir completo
+                all_segments.append(text)
                 segment_map.append(idx)
         
         # Aplicar glosario pre-traducción si existe
@@ -280,7 +285,8 @@ async def translate(request: TranslateRequest):
             direction=request.direction,
             max_new_tokens=request.max_new_tokens,
             use_cache=True,
-            formal=request.formal or settings.FORMAL_DA
+            formal=request.formal or settings.FORMAL_DA,
+            strict_max=request.strict_max
         )
         
         # Aplicar glosario post-traducción si existe
@@ -299,8 +305,13 @@ async def translate(request: TranslateRequest):
                 for i, seg_idx in enumerate(segment_map) 
                 if seg_idx == original_idx
             ]
-            # Unir con doble espacio
-            translations.append(' '.join(segs_for_this_text))
+            
+            if len(segs_for_this_text) == 1:
+                # Texto no segmentado: usar traducción directa
+                translations.append(segs_for_this_text[0])
+            else:
+                # Texto segmentado: unir con espacio
+                translations.append(' '.join(segs_for_this_text))
         
         # Métricas finales
         elapsed_ms = int((time.time() - start_time) * 1000)
@@ -426,7 +437,8 @@ async def translate_html_endpoint(request: TranslateHTMLRequest):
             direction=request.direction,
             max_new_tokens=request.max_new_tokens,
             use_cache=True,
-            formal=request.formal or settings.FORMAL_DA
+            formal=request.formal or settings.FORMAL_DA,
+            strict_max=request.strict_max
         )
         
         # Aplicar glosario post-traducción si existe

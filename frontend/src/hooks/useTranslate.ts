@@ -10,7 +10,9 @@ export function useTranslate(mode: TranslationMode) {
   const apiUrl = useAppStore((state) => state.apiUrl)
   const direction = useAppStore((state) => state.direction)
   const formal = useAppStore((state) => state.formal)
+  const maxTokensMode = useAppStore((state) => state.maxTokensMode)
   const maxNewTokens = useAppStore((state) => state.maxNewTokens)
+  const strictMax = useAppStore((state) => state.strictMax)
   const glossaryText = useAppStore((state) => state.glossaryText)
   const setIsTranslating = useAppStore((state) => state.setIsTranslating)
   const setLastLatencyMs = useAppStore((state) => state.setLastLatencyMs)
@@ -39,29 +41,35 @@ export function useTranslate(mode: TranslationMode) {
       let result
 
       if (mode === 'text') {
-        const response = await translateText(
-          {
-            text: input,
-            direction,
-            formal: shouldUseFormal,
+        const payload = {
+          text: input,
+          direction,
+          formal: shouldUseFormal,
+          // Solo enviar max_new_tokens si modo=manual
+          ...(maxTokensMode === 'manual' ? {
             max_new_tokens: maxNewTokens,
-            glossary,
-          },
-          apiUrl
-        )
+            strict_max: strictMax
+          } : {}),
+          glossary,
+        }
+        
+        const response = await translateText(payload, apiUrl)
         result = response.data.translations.join('\n\n')
         setLastLatencyMs(response.latencyMs)
       } else {
-        const response = await translateHtml(
-          {
-            html: input,
-            direction,
-            formal: shouldUseFormal,
+        const payload = {
+          html: input,
+          direction,
+          formal: shouldUseFormal,
+          // Solo enviar max_new_tokens si modo=manual
+          ...(maxTokensMode === 'manual' ? {
             max_new_tokens: maxNewTokens,
-            glossary,
-          },
-          apiUrl
-        )
+            strict_max: strictMax
+          } : {}),
+          glossary,
+        }
+        
+        const response = await translateHtml(payload, apiUrl)
         result = response.data.html
         setLastLatencyMs(response.latencyMs)
       }

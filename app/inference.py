@@ -27,13 +27,13 @@ def _derive_max_new_tokens(input_lengths: List[int]) -> int:
     """
     Calcula max_new_tokens adaptativo basado en la longitud de entrada.
     
-    Heurística: salida ~ 1.2x del input más largo; límite 512 según schema.
+    Heurística: salida ~ 1.2x del input más largo.
     
     Args:
         input_lengths: Lista de longitudes de input_ids
         
     Returns:
-        max_new_tokens recomendado (entre 128 y 512)
+        max_new_tokens recomendado (entre 128 y MAX_MAX_NEW_TOKENS)
         
     Examples:
         >>> _derive_max_new_tokens([50, 100])
@@ -42,36 +42,63 @@ def _derive_max_new_tokens(input_lengths: List[int]) -> int:
         512
     """
     if not input_lengths:
-        return settings.MAX_NEW_TOKENS
+        return settings.DEFAULT_MAX_NEW_TOKENS
     
     max_input_len = max(input_lengths)
-    estimated = int(max_input_len * 1.2)
+    estimated = int(max_input_len * 1.2)  # ~20% más que el input más largo
     
-    # Clamp entre 128 y 512 (límite del schema Pydantic)
-    return max(128, min(512, estimated))
+    # Clamp entre 128 y MAX_MAX_NEW_TOKENS (512)
+    return max(128, min(settings.MAX_MAX_NEW_TOKENS, estimated))
+
+
+def _needs_continuation(tokens: List[str], max_tokens: int) -> bool:
+    """
+    Determina si una traducción necesita continuación automática.
+    
+    Criterios:
+    - Tocó el techo de tokens (len >= max_tokens - 1)
+    - No termina en puntuación de cierre (., !, ?, …)
+    
+    Args:
+        tokens: Lista de tokens generados
+        max_tokens: Límite máximo usado
+        
+    Returns:
+        True si necesita continuación
+    """
+    if len(tokens) < max_tokens - 1:
+        return False
+    
+    # Verificar si termina con puntuación de cierre
+    last_token = tokens[-1] if tokens else ""
+    ending_punctuation = ['.', '!', '?', '…', '。', '！', '？']
+    
+    return not any(last_token.endswith(punct) for punct in ending_punctuation)
 
 
 def translate_batch(
     texts: List[str],
     direction: str = "es-da",
-    max_new_tokens: int = None,
-    beam_size: int = None,
+    max_new_tokens: Optional[int] = None,
+    beam_size: Optional[int] = None,
     use_cache: bool = True,
-    formal: bool = False
+    formal: bool = False,
+    strict_max: bool = False
 ) -> List[str]:
     """
     Traduce un batch de textos entre español y danés (bidireccional).
     
-    Incluye caché LRU, post-procesado y validación de salida.
+    Incluye caché LRU, post-procesado, validación de salida y continuación automática.
     Soporta ES→DA y DA→ES.
     
     Args:
         texts: Lista de textos a traducir
         direction: Dirección de traducción ("es-da" o "da-es")
-        max_new_tokens: Máximo número de tokens a generar (default: settings.MAX_NEW_TOKENS)
+        max_new_tokens: Máximo número de tokens a generar (None = auto-calculado)
         beam_size: Tamaño del beam search (default: settings.BEAM_SIZE)
         use_cache: Si True, usa caché para evitar retraducciones
         formal: Si True, aplica estilo formal (solo para salida danesa)
+        strict_max: Si True, NO elevar max_new_tokens ni hacer continuación automática
         
     Returns:
         Lista de traducciones post-procesadas
@@ -101,8 +128,8 @@ def translate_batch(
     # Usar defaults de settings si no se especifican
     if beam_size is None:
         beam_size = settings.BEAM_SIZE
-    if max_new_tokens is None:
-        max_new_tokens = settings.MAX_NEW_TOKENS
+    
+    # max_new_tokens se calculará después de tokenizar (necesitamos input_lengths)
     
     # Configurar idiomas según dirección
     if direction == "es-da":
@@ -173,13 +200,28 @@ def translate_batch(
         # input_ids ya es una lista de listas (sin tensores)
         input_ids_list = encoded["input_ids"]
         
-        # Calcular max_new_tokens adaptativo si no fue especificado por el cliente
-        if max_new_tokens == settings.MAX_NEW_TOKENS:
-            # Cliente no especificó; derivar basado en longitud de entrada
-            input_lengths = [len(ids) for ids in input_ids_list]
-            derived_max_new_tokens = _derive_max_new_tokens(input_lengths)
-            logger.debug(f"max_new_tokens adaptativo: {max_new_tokens} → {derived_max_new_tokens}")
-            max_new_tokens = derived_max_new_tokens
+        # Calcular/elevar max_new_tokens según lógica adaptativa + elevación server-side
+        input_lengths = [len(ids) for ids in input_ids_list]
+        derived = _derive_max_new_tokens(input_lengths)
+        
+        if max_new_tokens is None:
+            # Cliente no especificó: usar derivado
+            max_new_tokens = derived
+            logger.debug(f"max_new_tokens auto-calculado: {max_new_tokens}")
+        else:
+            # Cliente especificó un valor
+            if strict_max:
+                # Respetar exactamente el valor del cliente
+                logger.debug(f"max_new_tokens (strict): {max_new_tokens}")
+            else:
+                # Elevar al mínimo recomendado si es necesario
+                original = max_new_tokens
+                max_new_tokens = max(max_new_tokens, derived)
+                if max_new_tokens != original:
+                    logger.info(f"max_new_tokens elevado: {original} → {max_new_tokens} (recomendado)")
+        
+        # Clamp final al cap de seguridad
+        max_new_tokens = min(max_new_tokens, settings.MAX_MAX_NEW_TOKENS)
         
         # Convertir IDs a tokens para CTranslate2
         source_tokens = [
@@ -210,6 +252,42 @@ def translate_batch(
         
         # Extraer hipótesis (primera de cada beam)
         hypotheses = [result.hypotheses[0] for result in results]
+        
+        # Continuación automática si tocó el techo sin terminar correctamente
+        if not strict_max and max_new_tokens < settings.MAX_MAX_NEW_TOKENS:
+            continuation_indices = []
+            for i, tokens in enumerate(hypotheses):
+                if _needs_continuation(tokens, max_new_tokens):
+                    continuation_indices.append(i)
+            
+            if continuation_indices:
+                logger.info(f"Continuación automática para {len(continuation_indices)} item(s) truncado(s)")
+                
+                for idx in continuation_indices:
+                    # Target prefix = tokens ya generados
+                    prefix_tokens = hypotheses[idx]
+                    new_max = min(max_new_tokens + settings.CONTINUATION_INCREMENT, settings.MAX_MAX_NEW_TOKENS)
+                    
+                    # Segunda pasada con los tokens previos como prefix
+                    continuation_result = translator.translate_batch(
+                        [source_tokens[idx]],
+                        target_prefix=[[tgt_bos_tok] + prefix_tokens],  # incluir BOS + tokens previos
+                        beam_size=beam_size,
+                        max_decoding_length=new_max - len(prefix_tokens),  # solo generar lo que falta
+                        return_scores=False,
+                        repetition_penalty=1.2,
+                        no_repeat_ngram_size=3
+                    )
+                    
+                    # Obtener tokens de continuación
+                    continuation_tokens = continuation_result[0].hypotheses[0]
+                    
+                    # Concatenar (evitar duplicar el primer token si el decoder lo repite)
+                    if continuation_tokens and continuation_tokens[0] == prefix_tokens[-1]:
+                        continuation_tokens = continuation_tokens[1:]
+                    
+                    hypotheses[idx] = prefix_tokens + continuation_tokens
+                    logger.debug(f"Item {idx}: continuación agregó {len(continuation_tokens)} tokens")
         
         # Convertir tokens a texto y post-procesar
         new_translations = []
