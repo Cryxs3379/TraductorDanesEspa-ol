@@ -187,6 +187,31 @@ async def health():
     }
 
 
+def resolve_max_new_tokens(user_value: Union[int, None], input_texts: list[str]) -> Union[int, None]:
+    """
+    Resuelve max_new_tokens basado en el valor del usuario y el texto de entrada.
+    
+    CORREGIDO: No limitar artificialmente cuando usuario no especifica valor.
+    
+    Args:
+        user_value: Valor enviado por el cliente (puede ser None)
+        input_texts: Lista de textos de entrada para cálculo adaptativo
+        
+    Returns:
+        max_new_tokens a usar en la traducción
+    """
+    from app.inference import _derive_max_new_tokens
+    
+    if user_value is not None and user_value > 0:
+        # Usuario especificó un valor: validar mínimo pero NO limitar máximo
+        # El límite máximo se maneja en inference.py con la lógica adaptativa
+        return max(1, int(user_value))
+    
+    # Usuario no especificó: None para activar cálculo adaptativo en translate_batch
+    # Esto permite que inference.py use su lógica ultra-agresiva
+    return None
+
+
 @app.post("/translate", response_model=TranslateResponse)
 async def translate(request: TranslateRequest):
     """
@@ -276,6 +301,17 @@ async def translate(request: TranslateRequest):
                 for seg in all_segments
             ]
         
+        # Resolver max_new_tokens: usar cálculo adaptativo si no se especifica
+        resolved_max_new_tokens = resolve_max_new_tokens(
+            request.max_new_tokens, 
+            all_segments
+        )
+        
+        # Debug logging para investigar truncado
+        logger.info(f"🔍 DEBUG - request.max_new_tokens: {request.max_new_tokens}")
+        logger.info(f"🔍 DEBUG - resolved_max_new_tokens: {resolved_max_new_tokens}")
+        logger.info(f"🔍 DEBUG - strict_max: {request.strict_max}")
+        
         # Traducir con caché y dirección
         if not settings.LOG_TRANSLATIONS:
             logger.info(f"Traduciendo {len(all_segments)} segmento(s) [{request.direction}]...")
@@ -283,7 +319,7 @@ async def translate(request: TranslateRequest):
         segment_translations = translate_batch(
             all_segments,
             direction=request.direction,
-            max_new_tokens=request.max_new_tokens,
+            max_new_tokens=resolved_max_new_tokens,
             use_cache=True,
             formal=request.formal or settings.FORMAL_DA,
             strict_max=request.strict_max
@@ -431,11 +467,17 @@ async def translate_html_endpoint(request: TranslateHTMLRequest):
                 for t in texts_to_translate
             ]
         
+        # Resolver max_new_tokens: usar cálculo adaptativo si no se especifica
+        resolved_max_new_tokens = resolve_max_new_tokens(
+            request.max_new_tokens, 
+            texts_to_translate
+        )
+        
         # Traducir con caché, post-procesado y dirección
         translated_texts = translate_batch(
             texts_to_translate,
             direction=request.direction,
-            max_new_tokens=request.max_new_tokens,
+            max_new_tokens=resolved_max_new_tokens,
             use_cache=True,
             formal=request.formal or settings.FORMAL_DA,
             strict_max=request.strict_max

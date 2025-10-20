@@ -41,32 +41,34 @@ export function useTranslate(mode: TranslationMode) {
       let result
 
       if (mode === 'text') {
-        const payload = {
+        const payload: any = {
           text: input,
           direction,
           formal: shouldUseFormal,
-          // Solo enviar max_new_tokens si modo=manual
-          ...(maxTokensMode === 'manual' ? {
-            max_new_tokens: maxNewTokens,
-            strict_max: strictMax
-          } : {}),
           glossary,
+        }
+        
+        // Solo enviar max_new_tokens si modo=manual y el valor es válido
+        if (maxTokensMode === 'manual' && Number.isFinite(maxNewTokens)) {
+          payload.max_new_tokens = Math.max(1, Math.floor(maxNewTokens))
+          payload.strict_max = strictMax
         }
         
         const response = await translateText(payload, apiUrl)
         result = response.data.translations.join('\n\n')
         setLastLatencyMs(response.latencyMs)
       } else {
-        const payload = {
+        const payload: any = {
           html: input,
           direction,
           formal: shouldUseFormal,
-          // Solo enviar max_new_tokens si modo=manual
-          ...(maxTokensMode === 'manual' ? {
-            max_new_tokens: maxNewTokens,
-            strict_max: strictMax
-          } : {}),
           glossary,
+        }
+        
+        // Solo enviar max_new_tokens si modo=manual y el valor es válido
+        if (maxTokensMode === 'manual' && Number.isFinite(maxNewTokens)) {
+          payload.max_new_tokens = Math.max(1, Math.floor(maxNewTokens))
+          payload.strict_max = strictMax
         }
         
         const response = await translateHtml(payload, apiUrl)

@@ -22,14 +22,14 @@ class Settings:
     BEAM_SIZE: int = int(os.getenv("BEAM_SIZE", "3"))
     
     # Tokens: auto-calculados por defecto, con elevación server-side y continuación
-    MAX_INPUT_TOKENS: int = int(os.getenv("MAX_INPUT_TOKENS", "1024"))      # para no cortar entrada
-    DEFAULT_MAX_NEW_TOKENS: int = int(os.getenv("DEFAULT_MAX_NEW_TOKENS", "256"))  # si cliente no envía valor
-    MAX_MAX_NEW_TOKENS: int = int(os.getenv("MAX_MAX_NEW_TOKENS", "512"))   # hard cap seguro
-    CONTINUATION_INCREMENT: int = 128  # tokens extra para continuación automática
+    MAX_INPUT_TOKENS: int = int(os.getenv("MAX_INPUT_TOKENS", "8192"))      # extremadamente alto para no cortar entrada
+    DEFAULT_MAX_NEW_TOKENS: int = int(os.getenv("DEFAULT_MAX_NEW_TOKENS", "4096"))  # muy alto por defecto
+    MAX_MAX_NEW_TOKENS: int = int(os.getenv("MAX_MAX_NEW_TOKENS", "8192"))   # sin límites prácticos
+    CONTINUATION_INCREMENT: int = 256  # tokens extra para continuación automática (aumentado)
     
     # Segmentación automática (cuando entrada > 90% del límite)
     AUTO_SEGMENT_THRESHOLD: float = 0.9
-    MAX_SEGMENT_CHARS: int = int(os.getenv("MAX_SEGMENT_CHARS", "1500"))  # aumentado para menos segmentos
+    MAX_SEGMENT_CHARS: int = int(os.getenv("MAX_SEGMENT_CHARS", "10000"))  # muy alto para evitar segmentación innecesaria
     
     # Servidor
     HOST: str = os.getenv("HOST", "0.0.0.0")

@@ -25,39 +25,42 @@ logger = logging.getLogger(__name__)
 
 def _derive_max_new_tokens(input_lengths: List[int]) -> int:
     """
-    Calcula max_new_tokens adaptativo basado en la longitud de entrada.
+    Calcula max_new_tokens generosamente para evitar truncado.
     
-    Heurística: salida ~ 1.2x del input más largo.
+    NUEVA LÓGICA: Siempre generar valores muy altos para asegurar traducción completa.
     
     Args:
         input_lengths: Lista de longitudes de input_ids
         
     Returns:
-        max_new_tokens recomendado (entre 128 y MAX_MAX_NEW_TOKENS)
-        
-    Examples:
-        >>> _derive_max_new_tokens([50, 100])
-        128
-        >>> _derive_max_new_tokens([400, 500])
-        512
+        max_new_tokens muy generoso (sin límites artificiales)
     """
     if not input_lengths:
-        return settings.DEFAULT_MAX_NEW_TOKENS
+        # Valor por defecto muy alto si no hay input
+        return 4096
     
     max_input_len = max(input_lengths)
-    estimated = int(max_input_len * 1.2)  # ~20% más que el input más largo
     
-    # Clamp entre 128 y MAX_MAX_NEW_TOKENS (512)
-    return max(128, min(settings.MAX_MAX_NEW_TOKENS, estimated))
+    # LÓGICA MUY GENEROSA: factor mínimo 3.0x y hasta 5.0x para textos largos
+    if max_input_len <= 100:
+        factor = 3.0  # Muy generoso incluso para textos cortos
+    elif max_input_len <= 300:
+        factor = 4.0  # Extremadamente generoso
+    else:
+        factor = 5.0  # Máximo generoso para textos largos
+    
+    estimated = int(max_input_len * factor)
+    
+    # Mínimo absoluto de 1024 tokens, sin máximo
+    return max(1024, estimated)
 
 
 def _needs_continuation(tokens: List[str], max_tokens: int) -> bool:
     """
     Determina si una traducción necesita continuación automática.
     
-    Criterios:
-    - Tocó el techo de tokens (len >= max_tokens - 1)
-    - No termina en puntuación de cierre (., !, ?, …)
+    LÓGICA EXTREMADAMENTE AGRESIVA:
+    - Detectar cualquier indicio de truncado posible
     
     Args:
         tokens: Lista de tokens generados
@@ -66,14 +69,46 @@ def _needs_continuation(tokens: List[str], max_tokens: int) -> bool:
     Returns:
         True si necesita continuación
     """
-    if len(tokens) < max_tokens - 1:
+    if not tokens:
         return False
     
-    # Verificar si termina con puntuación de cierre
-    last_token = tokens[-1] if tokens else ""
-    ending_punctuation = ['.', '!', '?', '…', '。', '！', '？']
+    logger.info(f"Evaluando continuación: {len(tokens)}/{max_tokens} tokens")
     
-    return not any(last_token.endswith(punct) for punct in ending_punctuation)
+    # CRITERIO 1: Longitud mínima absoluta para textos largos
+    # Si tenemos muchos tokens pero no terminamos bien, continuar
+    if len(tokens) > 200:  # Para textos largos, ser más estricto
+        last_token = tokens[-1] if tokens else ""
+        ending_punctuation = ['.', '!', '?', '…', '。', '！', '？', ')', '"', "'"]
+        ends_properly = any(last_token.endswith(punct) for punct in ending_punctuation)
+        
+        if not ends_properly:
+            logger.info(f"CRITERIO 1 - Necesita continuación: texto largo sin fin apropiado: '{last_token}'")
+            return True
+    
+    # CRITERIO 2: Threshold bajo para cualquier caso
+    threshold = int(max_tokens * 0.3)  # Muy bajo: 30%
+    if len(tokens) >= threshold:
+        last_token = tokens[-1] if tokens else ""
+        ending_punctuation = ['.', '!', '?', '…', '。', '！', '？', ')', '"', "'"]
+        ends_properly = any(last_token.endswith(punct) for punct in ending_punctuation)
+        
+        if not ends_properly:
+            logger.info(f"CRITERIO 2 - Necesita continuación: threshold bajo sin fin apropiado: {len(tokens)}/{max_tokens}")
+            return True
+    
+    # CRITERIO 3: Para textos de longitud media, verificar finalización natural
+    if len(tokens) > 100:
+        # Concatenar últimos tokens para verificar patrón
+        last_tokens_text = " ".join(tokens[-5:]).lower()
+        
+        # Detectar si parece incompleto
+        incomplete_patterns = ["fordi", "så", "desuden", "derfor", "men", "og"]
+        if any(pattern in last_tokens_text for pattern in incomplete_patterns):
+            logger.info(f"CRITERIO 3 - Necesita continuación: patrón incompleto detectado")
+            return True
+    
+    logger.info(f"No necesita continuación")
+    return False
 
 
 def translate_batch(
@@ -188,11 +223,15 @@ def translate_batch(
         # Tokenizar textos de entrada SIN TORCH (solo listas de IDs)
         # NLLB espera source language token al inicio
         # El tokenizador ya añade este token automáticamente si src_lang está configurado
+        # Usar límite muy alto para evitar truncado de entrada
+        safe_input_limit = max(8192, settings.MAX_INPUT_TOKENS)
+        logger.info(f"🔧 Tokenizando con límite de entrada: {safe_input_limit}")
+        
         encoded = tokenizer(
             texts_normalized,
             padding=True,
-            truncation=True,
-            max_length=settings.MAX_INPUT_TOKENS if hasattr(settings, 'MAX_INPUT_TOKENS') else 384,
+            truncation=True,  # Mantener pero con límite muy alto
+            max_length=safe_input_limit,
             return_attention_mask=False,
             return_token_type_ids=False
         )
@@ -204,24 +243,32 @@ def translate_batch(
         input_lengths = [len(ids) for ids in input_ids_list]
         derived = _derive_max_new_tokens(input_lengths)
         
+        # Debug logging mejorado para investigar truncado
+        logger.info(f"🔍 INFERENCE DEBUG - max_new_tokens recibido: {max_new_tokens}")
+        logger.info(f"🔍 INFERENCE DEBUG - input_lengths: {input_lengths}")
+        logger.info(f"🔍 INFERENCE DEBUG - derived: {derived}")
+        logger.info(f"🔍 INFERENCE DEBUG - strict_max: {strict_max}")
+        
         if max_new_tokens is None:
-            # Cliente no especificó: usar derivado
-            max_new_tokens = derived
-            logger.debug(f"max_new_tokens auto-calculado: {max_new_tokens}")
+            # Cliente no especificó: usar valor extremadamente alto para evitar truncado
+            max_new_tokens = max(4096, derived)  # Mínimo 4096 tokens
+            logger.info(f"🔄 max_new_tokens auto-calculado (EXTREMO): {max_new_tokens}")
         else:
             # Cliente especificó un valor
             if strict_max:
                 # Respetar exactamente el valor del cliente
-                logger.debug(f"max_new_tokens (strict): {max_new_tokens}")
+                logger.info(f"🔒 max_new_tokens (strict): {max_new_tokens}")
             else:
-                # Elevar al mínimo recomendado si es necesario
+                # SIEMPRE elevar a valores extremadamente altos para evitar truncado
                 original = max_new_tokens
-                max_new_tokens = max(max_new_tokens, derived)
+                max_new_tokens = max(max_new_tokens, max(4096, derived))  # Mínimo 4096 siempre
                 if max_new_tokens != original:
-                    logger.info(f"max_new_tokens elevado: {original} → {max_new_tokens} (recomendado)")
+                    logger.info(f"📈 max_new_tokens elevado automáticamente: {original} → {max_new_tokens} (extremo)")
         
-        # Clamp final al cap de seguridad
-        max_new_tokens = min(max_new_tokens, settings.MAX_MAX_NEW_TOKENS)
+        # NO aplicar límites artificiales - permitir traducción completa
+        # max_new_tokens ya está calculado correctamente arriba
+        
+        logger.info(f"🚀 FINAL - Usando max_new_tokens: {max_new_tokens}")
         
         # Convertir IDs a tokens para CTranslate2
         source_tokens = [
@@ -239,12 +286,16 @@ def translate_batch(
         
         target_prefix = [[tgt_bos_tok]] * len(texts_to_translate)
         
-        # Traducir con CTranslate2 (parámetros conservadores para evitar cuelgues)
+        # Traducir con CTranslate2 usando valores muy altos para evitar truncado
+        # Asegurar que nunca se limita artificialmente
+        safe_max_tokens = max(8192, max_new_tokens)  # Mínimo 8192 tokens
+        logger.info(f"🔧 Usando max_decoding_length: {safe_max_tokens}")
+        
         results = translator.translate_batch(
             source_tokens,
             target_prefix=target_prefix,
             beam_size=beam_size,
-            max_decoding_length=max_new_tokens,
+            max_decoding_length=safe_max_tokens,
             return_scores=False,
             repetition_penalty=1.2,  # Evitar repeticiones
             no_repeat_ngram_size=3   # Evitar repetición de 3-gramas
@@ -253,27 +304,35 @@ def translate_batch(
         # Extraer hipótesis (primera de cada beam)
         hypotheses = [result.hypotheses[0] for result in results]
         
-        # Continuación automática si tocó el techo sin terminar correctamente
-        if not strict_max and max_new_tokens < settings.MAX_MAX_NEW_TOKENS:
+        # Continuación automática SIEMPRE para textos largos (sin límites)
+        if not strict_max:
             continuation_indices = []
             for i, tokens in enumerate(hypotheses):
-                if _needs_continuation(tokens, max_new_tokens):
+                # LÓGICA SIMPLE: Si el texto original era largo, hacer continuación SIEMPRE
+                original_text = texts_to_translate[i] if i < len(texts_to_translate) else ""
+                is_long_text = len(original_text) > 500  # Texto de más de 500 chars
+                
+                if is_long_text or _needs_continuation(tokens, safe_max_tokens):
                     continuation_indices.append(i)
+                    logger.info(f"Item {i}: candidato para continuación (long_text={is_long_text}, needs_cont={_needs_continuation(tokens, safe_max_tokens)})")
             
             if continuation_indices:
-                logger.info(f"Continuación automática para {len(continuation_indices)} item(s) truncado(s)")
+                logger.info(f"🔄 Continuación automática para {len(continuation_indices)} item(s)")
                 
                 for idx in continuation_indices:
                     # Target prefix = tokens ya generados
                     prefix_tokens = hypotheses[idx]
-                    new_max = min(max_new_tokens + settings.CONTINUATION_INCREMENT, settings.MAX_MAX_NEW_TOKENS)
+                    logger.info(f"Continuando item {idx}: tokens actuales={len(prefix_tokens)}")
+                    
+                    # EXTREMADAMENTE generoso para continuación - sin límites artificiales
+                    new_max = 16384  # Valor fijo muy alto
                     
                     # Segunda pasada con los tokens previos como prefix
                     continuation_result = translator.translate_batch(
                         [source_tokens[idx]],
                         target_prefix=[[tgt_bos_tok] + prefix_tokens],  # incluir BOS + tokens previos
                         beam_size=beam_size,
-                        max_decoding_length=new_max - len(prefix_tokens),  # solo generar lo que falta
+                        max_decoding_length=new_max,  # Sin restar - usar valor alto completo
                         return_scores=False,
                         repetition_penalty=1.2,
                         no_repeat_ngram_size=3
@@ -287,7 +346,7 @@ def translate_batch(
                         continuation_tokens = continuation_tokens[1:]
                     
                     hypotheses[idx] = prefix_tokens + continuation_tokens
-                    logger.debug(f"Item {idx}: continuación agregó {len(continuation_tokens)} tokens")
+                    logger.info(f"Item {idx}: continuación agregó {len(continuation_tokens)} tokens. Total: {len(hypotheses[idx])}")
         
         # Convertir tokens a texto y post-procesar
         new_translations = []

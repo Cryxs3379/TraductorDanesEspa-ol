@@ -23,7 +23,7 @@ class TranslateRequest(BaseModel):
     max_new_tokens: Optional[int] = Field(
         default=None,
         ge=32,
-        le=512,
+        le=10000,  # Sin límites prácticos
         description="Número máximo de tokens a generar (None = auto-calculado por el servidor)"
     )
     strict_max: bool = Field(
@@ -125,7 +125,7 @@ class TranslateHTMLRequest(BaseModel):
     max_new_tokens: Optional[int] = Field(
         default=None,
         ge=32,
-        le=512,
+        le=10000,  # Sin límites prácticos
         description="Número máximo de tokens a generar por bloque (None = auto-calculado)"
     )
     strict_max: bool = Field(
