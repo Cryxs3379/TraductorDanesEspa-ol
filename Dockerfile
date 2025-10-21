@@ -21,13 +21,15 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 # =============================================================================
-# Instalar dependencias del sistema
+# Instalar dependencias del sistema (minimal para seguridad)
 # =============================================================================
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     build-essential \
+    curl \
     && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean
+    && apt-get clean \
+    && apt-get autoremove -y
 
 # =============================================================================
 # Configurar aplicación
@@ -75,14 +77,16 @@ ENV LOG_TRANSLATIONS=false \
 # Exponer puerto (solo necesario si permites acceso desde fuera del contenedor)
 EXPOSE 8000
 
-# Health check (verifica que el modelo está cargado y el API responde)
-HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()" || exit 1
+# Usuario no-root para mayor seguridad
+RUN useradd -m -u 1000 translator && \
+    chown -R translator:translator /app && \
+    chmod -R 755 /app
 
-# Usuario no-root para mayor seguridad (opcional pero recomendado)
-# Descomenta las siguientes líneas si quieres ejecutar como usuario no-root:
-# RUN useradd -m -u 1000 translator && chown -R translator:translator /app
-# USER translator
+# Health check mejorado con curl (después de crear usuario)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+USER translator
 
 # =============================================================================
 # Comando de inicio

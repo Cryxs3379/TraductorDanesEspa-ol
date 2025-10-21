@@ -1,102 +1,205 @@
 """
-Utilidades para procesamiento HTML.
+Utilidades centralizadas para sanitización y procesamiento HTML seguro.
 
-Sanitización y limpieza de HTML de correos electrónicos.
+Garantiza que todo HTML procesado sea sanitizado consistentemente.
 """
 import re
+from typing import List, Dict, Any
+from bs4 import BeautifulSoup, NavigableString, Tag
 
 
-def sanitize_html(html: str) -> str:
+def sanitize_html(html_content: str) -> str:
     """
-    Sanitiza HTML removiendo contenido peligroso.
-    
-    Preserva solo etiquetas básicas y seguras:
-    - Estructura: p, div, br, hr, h1-h6
-    - Formato: strong, b, em, i, u, span
-    - Listas: ul, ol, li
-    - Enlaces: a (solo atributo href)
-    - Tablas básicas: table, tr, td, th
-    
-    Remueve:
-    - Scripts y event handlers
-    - Estilos inline peligrosos
-    - Iframes y objetos
-    - javascript: en URLs
+    Sanitiza HTML eliminando contenido peligroso.
     
     Args:
-        html: HTML a sanitizar
+        html_content: HTML de entrada
         
     Returns:
-        HTML limpio y seguro
+        HTML sanitizado y seguro
     """
-    if not html:
+    if not html_content or not html_content.strip():
         return ""
     
-    # 1. Remover scripts
-    html = re.sub(
-        r'<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>',
-        '',
-        html,
-        flags=re.IGNORECASE
-    )
+    # Parsear HTML con BeautifulSoup
+    soup = BeautifulSoup(html_content, 'html.parser')
     
-    # 2. Remover event handlers inline (onclick, onerror, etc.)
-    html = re.sub(
-        r'\s*on\w+\s*=\s*["\']?[^"\']*["\']?',
-        '',
-        html,
-        flags=re.IGNORECASE
-    )
+    # Etiquetas permitidas para emails/correos
+    allowed_tags = {
+        'p', 'br', 'strong', 'em', 'b', 'i', 'u', 'span', 'div',
+        'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+        'ul', 'ol', 'li', 'blockquote',
+        'a', 'img', 'table', 'tr', 'td', 'th', 'thead', 'tbody'
+    }
     
-    # 3. Remover javascript: en hrefs
-    html = re.sub(
-        r'href\s*=\s*["\']?\s*javascript:',
-        'href="#',
-        html,
-        flags=re.IGNORECASE
-    )
+    # Atributos permitidos
+    allowed_attrs = {
+        'href', 'src', 'alt', 'title', 'class', 'id', 'style',
+        'width', 'height', 'align', 'valign', 'colspan', 'rowspan'
+    }
     
-    # 4. Remover iframes
-    html = re.sub(
-        r'<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>',
-        '',
-        html,
-        flags=re.IGNORECASE
-    )
+    # Limpiar etiquetas no permitidas pero mantener su contenido
+    for tag in soup.find_all():
+        if tag.name not in allowed_tags:
+            tag.unwrap()
+        else:
+            # Limpiar atributos no permitidos
+            if hasattr(tag, 'attrs'):
+                attrs_to_remove = []
+                for attr in tag.attrs:
+                    if attr.lower() not in allowed_attrs:
+                        attrs_to_remove.append(attr)
+                for attr in attrs_to_remove:
+                    del tag.attrs[attr]
+            
+            # Sanitizar URLs en href/src para evitar javascript:, data:, etc.
+            if tag.name == 'a' and 'href' in tag.attrs:
+                href = tag.attrs['href']
+                if not _is_safe_url(href):
+                    # Convertir a texto si la URL no es segura
+                    tag.name = 'span'
+                    del tag.attrs['href']
+            
+            if tag.name == 'img' and 'src' in tag.attrs:
+                src = tag.attrs['src']
+                if not _is_safe_url(src):
+                    # Eliminar imagen si src no es segura
+                    tag.decompose()
     
-    # 5. Remover objects y embeds
-    html = re.sub(
-        r'<(object|embed)\b[^<]*(?:(?!<\/\1>)<[^<]*)*<\/\1>',
-        '',
-        html,
-        flags=re.IGNORECASE
-    )
+    # Limpiar scripts, styles y otros elementos peligrosos que puedan haber quedado
+    for element in soup.find_all(['script', 'style', 'iframe', 'object', 'embed']):
+        element.decompose()
     
-    # 6. Limitar atributos en tags <a> solo a href
-    # (esto se hace mejor con un parser pero para simplicidad usamos regex)
-    html = re.sub(
-        r'(<a\s+)([^>]*?)(href="[^"]*")([^>]*?>)',
-        r'\1\3>',
-        html,
-        flags=re.IGNORECASE
-    )
-    
-    return html
+    return str(soup)
 
 
-def strip_html_tags(html: str) -> str:
+def _is_safe_url(url: str) -> bool:
     """
-    Remueve todas las etiquetas HTML, dejando solo texto.
+    Verifica si una URL es segura para mostrar.
     
     Args:
-        html: HTML a procesar
+        url: URL a verificar
         
     Returns:
-        Texto plano sin tags
+        True si la URL es segura, False en caso contrario
     """
-    # Remover tags
-    text = re.sub(r'<[^>]+>', ' ', html)
-    # Normalizar espacios
-    text = ' '.join(text.split())
-    return text.strip()
+    if not url:
+        return False
+    
+    url_lower = url.lower().strip()
+    
+    # Protocolos peligrosos
+    dangerous_protocols = [
+        'javascript:', 'data:', 'vbscript:', 'file:', 
+        'about:', 'chrome:', 'chrome-extension:'
+    ]
+    
+    for protocol in dangerous_protocols:
+        if url_lower.startswith(protocol):
+            return False
+    
+    # URLs relativas y absolutas seguras están bien
+    return url_lower.startswith(('http://', 'https://', 'mailto:', '/')) or not ':' in url_lower
 
+
+def extract_text_for_translation(html_content: str) -> List[Dict[str, Any]]:
+    """
+    Extrae texto de HTML preservando estructura para traducción.
+    
+    Args:
+        html_content: HTML de entrada sanitizado
+        
+    Returns:
+        Lista de bloques con texto y metadatos de estructura
+    """
+    if not html_content or not html_content.strip():
+        return []
+    
+    # Sanitizar primero
+    sanitized_html = sanitize_html(html_content)
+    soup = BeautifulSoup(sanitized_html, 'html.parser')
+    
+    blocks = []
+    
+    def extract_from_element(element, block_id: int = 0):
+        if isinstance(element, NavigableString):
+            text = str(element).strip()
+            if text:
+                blocks.append({
+                    'id': block_id,
+                    'text': text,
+                    'type': 'text',
+                    'element': None
+                })
+                return block_id + 1
+        
+        elif isinstance(element, Tag):
+            # Extraer texto directo del elemento
+            direct_text = ''
+            for child in element.children:
+                if isinstance(child, NavigableString):
+                    direct_text += str(child).strip() + ' '
+            
+            if direct_text.strip():
+                blocks.append({
+                    'id': block_id,
+                    'text': direct_text.strip(),
+                    'type': 'text',
+                    'element': {
+                        'tag': element.name,
+                        'attrs': dict(element.attrs)
+                    }
+                })
+                block_id += 1
+            
+            # Procesar elementos hijos
+            for child in element.children:
+                if isinstance(child, Tag):
+                    block_id = extract_from_element(child, block_id)
+        
+        return block_id
+    
+    # Procesar elementos principales
+    for element in soup.find_all(['p', 'div', 'span', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'td', 'th']):
+        extract_from_element(element)
+    
+    return blocks
+
+
+def rebuild_html(blocks: List[Dict[str, Any]], translations: List[str]) -> str:
+    """
+    Reconstruye HTML usando bloques y traducciones.
+    
+    Args:
+        blocks: Bloques de texto extraídos
+        translations: Traducciones correspondientes
+        
+    Returns:
+        HTML reconstruido
+    """
+    if len(blocks) != len(translations):
+        raise ValueError("Número de bloques y traducciones no coincide")
+    
+    # Construir HTML preservando estructura
+    html_parts = []
+    
+    for block, translation in zip(blocks, translations):
+        if block['type'] == 'text':
+            if block['element'] and block['element']['tag']:
+                # Reconstruir con etiquetas
+                tag = block['element']['tag']
+                attrs_str = ''
+                
+                if block['element']['attrs']:
+                    attrs_parts = []
+                    for attr, value in block['element']['attrs'].items():
+                        # Escapar atributos para seguridad
+                        escaped_value = re.sub(r'[<>"\'\s]', '', str(value))
+                        attrs_parts.append(f'{attr}="{escaped_value}"')
+                    attrs_str = ' ' + ' '.join(attrs_parts)
+                
+                html_parts.append(f'<{tag}{attrs_str}>{translation}</{tag}>')
+            else:
+                html_parts.append(translation)
+    
+    return '\n'.join(html_parts)

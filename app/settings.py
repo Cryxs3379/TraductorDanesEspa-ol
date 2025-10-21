@@ -21,11 +21,11 @@ class Settings:
     CT2_INTRA_THREADS: int = int(os.getenv("CT2_INTRA_THREADS", "4"))
     BEAM_SIZE: int = int(os.getenv("BEAM_SIZE", "3"))
     
-    # Tokens: auto-calculados por defecto, con elevación server-side y continuación
-    MAX_INPUT_TOKENS: int = int(os.getenv("MAX_INPUT_TOKENS", "8192"))      # extremadamente alto para no cortar entrada
-    DEFAULT_MAX_NEW_TOKENS: int = int(os.getenv("DEFAULT_MAX_NEW_TOKENS", "4096"))  # muy alto por defecto
-    MAX_MAX_NEW_TOKENS: int = int(os.getenv("MAX_MAX_NEW_TOKENS", "8192"))   # sin límites prácticos
-    CONTINUATION_INCREMENT: int = 256  # tokens extra para continuación automática (aumentado)
+    # Tokens: configuración dinámica según hardware y caso de uso
+    MAX_INPUT_TOKENS: int = int(os.getenv("MAX_INPUT_TOKENS", "4096"))      # Límite entrada (ajustable según RAM)
+    DEFAULT_MAX_NEW_TOKENS: int = int(os.getenv("DEFAULT_MAX_NEW_TOKENS", "1024"))  # Conservador por defecto
+    MAX_MAX_NEW_TOKENS: int = int(os.getenv("MAX_MAX_NEW_TOKENS", "8192"))   # Límite máximo (sin truncado)
+    CONTINUATION_INCREMENT: int = int(os.getenv("CONTINUATION_INCREMENT", "512"))  # Tokens extra para continuación
     
     # Segmentación automática (cuando entrada > 90% del límite)
     AUTO_SEGMENT_THRESHOLD: float = 0.9
@@ -39,7 +39,7 @@ class Settings:
     SOURCE_LANG: str = "spa_Latn"
     TARGET_LANG: str = "dan_Latn"
     
-    # Privacidad
+    # Privacidad - POR DEFECTO: no loguear contenido de usuario
     LOG_TRANSLATIONS: bool = os.getenv("LOG_TRANSLATIONS", "false").lower() == "true"
     
     # Post-procesado danés

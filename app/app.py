@@ -113,7 +113,7 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-# CORS habilitado para UI local (file:// y localhost)
+# CORS habilitado para UI local (file:// y localhost) - Configuración segura
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -124,23 +124,45 @@ app.add_middleware(
         "http://localhost:8000",
         "http://127.0.0.1:8000",
         "http://localhost:8001",
-        "http://localhost:8002"
+        "http://localhost:8002",
+        "http://localhost:5173",  # Vite dev server
+        "http://127.0.0.1:5173"
     ],
-    allow_methods=["*"],
-    allow_headers=["*"],
-    allow_credentials=False  # False cuando allow_origins incluye "*"
+    allow_methods=["GET", "POST", "OPTIONS"],  # Restrict methods
+    allow_headers=["Content-Type", "Authorization", "Accept"],  # Restrict headers
+    allow_credentials=False,  # Crítico: False cuando allow_origins incluye "*"
+    max_age=600  # Cache preflight por 10 minutos
 )
 
 
 # Middleware de seguridad
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
-    """Añade cabeceras de seguridad a todas las respuestas."""
+    """
+    Añade cabeceras de seguridad a todas las respuestas.
+    
+    Configuración robusta para entorno corporativo.
+    """
     response = await call_next(request)
+    
+    # Cabeceras de seguridad estándar
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
-    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    
+    # Cache control para APIs - no cachear respuestas con contenido sensible
+    if request.url.path.startswith(("/translate", "/info")):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    else:
+        # Para assets estáticos, permitir cache
+        response.headers["Cache-Control"] = "public, max-age=300"
+    
+    # Header de privacidad - no permitir seguimiento
+    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    
     return response
 
 
@@ -537,13 +559,27 @@ async def translate_html_endpoint(request: TranslateHTMLRequest):
 
 @app.get("/info")
 async def info():
-    """Devuelve información detallada del modelo y métricas del servidor."""
+    """
+    Devuelve información detallada del modelo y métricas agregadas del servidor.
+    
+    NO incluye contenido de usuario por privacidad.
+    """
     health_info = model_manager.health()
     cache_stats = translation_cache.stats()
     
     # Calcular uptime
     uptime_delta = datetime.now() - SERVER_START_TIME
     uptime_str = str(uptime_delta).split('.')[0]  # Formato HH:MM:SS
+    
+    # Métricas de rendimiento (sin contenido de usuario)
+    performance_metrics = {
+        "avg_request_time_ms": getattr(translation_cache, 'avg_request_time', 0),
+        "total_requests": getattr(translation_cache, 'total_requests', 0),
+        "threads_config": {
+            "ct2_inter_threads": settings.CT2_INTER_THREADS,
+            "ct2_intra_threads": settings.CT2_INTRA_THREADS
+        }
+    }
     
     return {
         "version": VERSION,
@@ -554,6 +590,8 @@ async def info():
             "config": health_info["config"],
             "load_time_ms": health_info["load_time_ms"]
         },
+        "performance": performance_metrics,
+        "cache": cache_stats,
         "capabilities": {
             "supported_directions": ["es-da", "da-es"],
             "source_languages": ["spa_Latn", "dan_Latn"],
@@ -567,9 +605,17 @@ async def info():
             "supports_formal_style": True,
             "supports_case_insensitive_glossary": True,
             "max_batch_size": settings.MAX_BATCH_SIZE,
-            "max_tokens_per_translation": 512
+            "max_tokens_per_translation": settings.MAX_MAX_NEW_TOKENS,
+            "auto_tokens_enabled": True,
+            "continuation_enabled": True
         },
-        "cache": cache_stats
+        "limits": {
+            "max_input_tokens": settings.MAX_INPUT_TOKENS,
+            "default_max_new_tokens": settings.DEFAULT_MAX_NEW_TOKENS,
+            "max_max_new_tokens": settings.MAX_MAX_NEW_TOKENS,
+            "max_segment_chars": settings.MAX_SEGMENT_CHARS,
+            "request_timeout": settings.REQUEST_TIMEOUT
+        }
     }
 
 

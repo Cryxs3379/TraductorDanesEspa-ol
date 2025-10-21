@@ -116,6 +116,68 @@ test-verbose: ## Ejecutar tests con output detallado
 		pytest tests/ -v -s; \
 	fi
 
+.PHONY: test-cov
+test-cov: ## Ejecutar tests con coverage
+	@echo "Ejecutando tests con coverage..."
+	@if [ -d "$(VENV)" ]; then \
+		$(VENV_BIN)/pytest tests/ --cov=app --cov-report=html --cov-report=term; \
+	else \
+		pytest tests/ --cov=app --cov-report=html --cov-report=term; \
+	fi
+
+.PHONY: lint
+lint: ## Ejecutar linters (ruff)
+	@echo "Ejecutando linter..."
+	@if [ -d "$(VENV)" ]; then \
+		$(VENV_BIN)/ruff check app/ tests/; \
+	else \
+		ruff check app/ tests/; \
+	fi
+
+.PHONY: lint-fix
+lint-fix: ## Corregir problemas de linting automáticamente
+	@echo "Corrigiendo problemas de linting..."
+	@if [ -d "$(VENV)" ]; then \
+		$(VENV_BIN)/ruff check --fix app/ tests/; \
+	else \
+		ruff check --fix app/ tests/; \
+	fi
+
+.PHONY: format
+format: ## Formatear código con black e isort
+	@echo "Formateando código..."
+	@if [ -d "$(VENV)" ]; then \
+		$(VENV_BIN)/black app/ tests/; \
+		$(VENV_BIN)/isort app/ tests/; \
+	else \
+		black app/ tests/; \
+		isort app/ tests/; \
+	fi
+
+.PHONY: typecheck
+typecheck: ## Ejecutar type checking con mypy
+	@echo "Ejecutando type checking..."
+	@if [ -d "$(VENV)" ]; then \
+		$(VENV_BIN)/mypy app/; \
+	else \
+		mypy app/; \
+	fi
+
+.PHONY: security
+security: ## Ejecutar auditoría de seguridad
+	@echo "Ejecutando auditoría de seguridad..."
+	@if [ -d "$(VENV)" ]; then \
+		$(VENV_BIN)/bandit -r app/ -f json -o bandit-report.json || true; \
+		$(VENV_BIN)/safety check --json || true; \
+	else \
+		bandit -r app/ -f json -o bandit-report.json || true; \
+		safety check --json || true; \
+	fi
+
+.PHONY: quality
+quality: lint typecheck test ## Ejecutar todas las verificaciones de calidad
+	@echo "✓ Todas las verificaciones de calidad completadas"
+
 .PHONY: clean
 clean: ## Limpiar archivos temporales
 	@echo "Limpiando archivos temporales..."
@@ -132,6 +194,21 @@ clean-all: clean ## Limpiar todo incluyendo venv y modelos
 	rm -rf $(VENV)
 	rm -rf models/
 	@echo "✓ Todo limpiado (venv y modelos eliminados)"
+
+.PHONY: build
+build: quality ## Construir aplicación (backend + frontend) después de verificar calidad
+	@echo "Construyendo aplicación..."
+	cd frontend && npm run build
+	@echo "✓ Build completado"
+
+.PHONY: e2e
+e2e: ## Ejecutar tests end-to-end
+	@echo "Ejecutando tests E2E..."
+	@if [ -d "$(VENV)" ]; then \
+		$(VENV_BIN)/pytest tests/ -m integration -v; \
+	else \
+		pytest tests/ -m integration -v; \
+	fi
 
 .PHONY: docker-build
 docker-build: ## Construir imagen Docker
