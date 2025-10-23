@@ -213,6 +213,135 @@ Departamento de TI=IT-afdeling
 - Emails: `usuario@dominio.com` → se preservan automáticamente
 - Números: `1000`, `1.234,56` → se preservan automáticamente
 
+### Preservar Saltos de Línea y Estructura
+
+El traductor **preserva automáticamente** la estructura del texto incluyendo:
+- ✅ Saltos de línea simples (`\n`)
+- ✅ Saltos de línea múltiples (`\n\n`, `\n\n\n`, etc.)
+- ✅ Maquetación de correos (firmas, párrafos, espaciado)
+- ✅ Estructura HTML completa (`<p>`, `<br>`, `<ul>`, etc.)
+
+#### Parámetro `preserve_newlines`
+
+Por defecto, `preserve_newlines=true`. Puedes desactivarlo para normalización legacy:
+
+```json
+{
+  "text": "Párrafo 1\n\nPárrafo 2",
+  "preserve_newlines": true,  // default
+  "direction": "es-da"
+}
+```
+
+#### ⚠️ Importante: Escapar saltos de línea en JSON
+
+Al enviar texto con saltos de línea, **debes escaparlos correctamente**:
+
+**❌ INCORRECTO (causará error 422):**
+```bash
+# NO hagas esto - JSON mal formado
+curl -X POST http://localhost:8000/translate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Línea 1
+Línea 2",
+    "direction": "es-da"
+  }'
+```
+
+**✅ CORRECTO - Linux/macOS:**
+```bash
+# Opción 1: Usar archivo temporal
+cat > body.json <<'JSON'
+{
+  "direction": "es-da",
+  "text": "Estimado Sr. García,\n\nGracias por contactarnos.\n\nAtentamente,\nEl equipo"
+}
+JSON
+
+curl -X POST http://localhost:8000/translate \
+  -H "Content-Type: application/json" \
+  --data-binary @body.json
+```
+
+```bash
+# Opción 2: Inline con saltos escapados
+curl -X POST http://localhost:8000/translate \
+  -H "Content-Type: application/json" \
+  -d '{"direction":"es-da","text":"Línea 1\nLínea 2\n\nFirma:\n— Nombre"}'
+```
+
+**✅ CORRECTO - Windows PowerShell:**
+```powershell
+# PowerShell usa "`n" para saltos de línea
+$body = @{
+  direction = "es-da"
+  text = "Estimado Sr. García,`n`nGracias por contactarnos.`n`nAtentamente,`nEl equipo"
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method Post `
+  -Uri http://localhost:8000/translate `
+  -ContentType "application/json" `
+  -Body $body
+```
+
+**✅ CORRECTO - Python:**
+```python
+import requests
+
+response = requests.post(
+    "http://localhost:8000/translate",
+    json={
+        "direction": "es-da",
+        "text": "Estimado Sr. García,\n\nGracias por contactarnos.\n\nAtentamente,\nEl equipo"
+    }
+)
+print(response.json())
+```
+
+#### Verificación de Estructura Preservada
+
+```bash
+# Ejemplo que verifica preservación
+cat > test.json <<'JSON'
+{
+  "direction": "es-da",
+  "text": "Hola Juan,\n\n¿Cómo estás?\n\nSaludos,\n— Pedro",
+  "preserve_newlines": true
+}
+JSON
+
+curl -X POST http://localhost:8000/translate \
+  -H "Content-Type: application/json" \
+  --data-binary @test.json | jq .
+
+# La salida debe tener exactamente 4 saltos de línea (\n)
+# y 2 separadores de párrafo (\n\n)
+```
+
+#### HTML: Preservación Automática de `<br>` y `<p>`
+
+El endpoint `/translate/html` preserva **toda** la estructura HTML:
+
+```bash
+cat > email.json <<'JSON'
+{
+  "direction": "es-da",
+  "html": "<p>Estimado cliente,</p>\n<p>Gracias por contactar.<br>\nAtentamente,<br>\nEl equipo</p>",
+  "preserve_newlines": true
+}
+JSON
+
+curl -X POST http://localhost:8000/translate/html \
+  -H "Content-Type: application/json" \
+  --data-binary @email.json
+```
+
+**Garantías:**
+- Número de `<p>`, `<br>`, `<ul>`, `<li>`, etc. se mantiene idéntico
+- Los atributos (`href`, `src`, `class`) no se traducen
+- La jerarquía del DOM no cambia
+
 ---
 
 ## 🐳 Docker

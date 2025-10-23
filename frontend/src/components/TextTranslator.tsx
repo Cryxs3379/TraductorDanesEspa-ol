@@ -45,6 +45,30 @@ export function TextTranslator() {
     }
   }
 
+  // ✅ Manejador de paste que preserva saltos de línea normalizando CRLF→LF
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const plainText = e.clipboardData.getData('text/plain')
+    if (plainText) {
+      e.preventDefault()
+      const textarea = e.currentTarget
+      const start = textarea.selectionStart ?? sourceText.length
+      const end = textarea.selectionEnd ?? sourceText.length
+      
+      // ✅ Normalizar solo finales de línea Windows/Mac → Unix
+      const normalized = plainText.replace(/\r\n?/g, '\n')
+      
+      // ✅ Insertar en posición del cursor preservando el resto
+      const newText = sourceText.slice(0, start) + normalized + sourceText.slice(end)
+      setSourceText(newText)
+      
+      // Restaurar posición del cursor después del texto pegado
+      setTimeout(() => {
+        const newPosition = start + normalized.length
+        textarea.setSelectionRange(newPosition, newPosition)
+      }, 0)
+    }
+  }
+
   const canTranslate = sourceText.trim().length > 0 && health?.model_loaded && !isLoading
 
   const getPlaceholder = (type: 'source' | 'target') => {
@@ -149,9 +173,11 @@ export function TextTranslator() {
           value={sourceText}
           onChange={(e) => setSourceText(e.target.value)}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           placeholder={getPlaceholder('source')}
           rows={15}
           className="flex-1 font-sans"
+          style={{ whiteSpace: 'pre-wrap' }}
         />
 
         <div className="flex items-center justify-between text-sm text-muted-foreground">
@@ -199,6 +225,7 @@ export function TextTranslator() {
           placeholder={getPlaceholder('target')}
           rows={15}
           className="flex-1 font-sans bg-muted/30"
+          style={{ whiteSpace: 'pre-wrap' }}
         />
 
         <div className="text-sm text-muted-foreground">

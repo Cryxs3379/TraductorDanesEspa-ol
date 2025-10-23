@@ -20,7 +20,8 @@ export function useTranslate(mode: TranslationMode) {
   const setLastSuccess = useAppStore((state) => state.setLastSuccess)
 
   const translate = async (input: string): Promise<string> => {
-    if (!input.trim()) {
+    // ⚠️ NO usar .trim() - preservamos la estructura exacta del usuario
+    if (!input || input.length === 0) {
       throw new Error('El texto no puede estar vacío')
     }
 
@@ -42,10 +43,11 @@ export function useTranslate(mode: TranslationMode) {
 
       if (mode === 'text') {
         const payload: any = {
-          text: input,
+          text: input, // ⚠️ NO tocar - preservar saltos de línea exactos
           direction,
           formal: shouldUseFormal,
           glossary,
+          preserve_newlines: true, // ✅ Preservar estructura por defecto
         }
         
         // Solo enviar max_new_tokens si modo=manual y el valor es válido
@@ -59,10 +61,11 @@ export function useTranslate(mode: TranslationMode) {
         setLastLatencyMs(response.latencyMs)
       } else {
         const payload: any = {
-          html: input,
+          html: input, // ⚠️ NO tocar - preservar HTML exacto
           direction,
           formal: shouldUseFormal,
           glossary,
+          preserve_newlines: true, // ✅ Preservar estructura HTML por defecto
         }
         
         // Solo enviar max_new_tokens si modo=manual y el valor es válido

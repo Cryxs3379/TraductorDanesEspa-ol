@@ -13,6 +13,10 @@ from app.startup import model_manager
 from app.cache import translation_cache
 from app.postprocess_da import postprocess_da
 from app.postprocess_es import postprocess_es
+from app.utils_text import (
+    normalize_preserving_newlines,
+    translate_preserving_structure
+)
 
 
 # Configuración de logging
@@ -118,7 +122,8 @@ def translate_batch(
     beam_size: Optional[int] = None,
     use_cache: bool = True,
     formal: bool = False,
-    strict_max: bool = False
+    strict_max: bool = False,
+    preserve_newlines: bool = True
 ) -> List[str]:
     """
     Traduce un batch de textos entre español y danés (bidireccional).
@@ -134,6 +139,7 @@ def translate_batch(
         use_cache: Si True, usa caché para evitar retraducciones
         formal: Si True, aplica estilo formal (solo para salida danesa)
         strict_max: Si True, NO elevar max_new_tokens ni hacer continuación automática
+        preserve_newlines: Si True, preserva todos los saltos de línea del original
         
     Returns:
         Lista de traducciones post-procesadas
@@ -213,7 +219,10 @@ def translate_batch(
     
     try:
         # Pre-procesar textos: normalizar espacios
-        texts_normalized = [_normalize_text(text) for text in texts_to_translate]
+        texts_normalized = [
+            _normalize_text(text, preserve_newlines=preserve_newlines) 
+            for text in texts_to_translate
+        ]
         
         # Configurar idioma source en el tokenizador
         if hasattr(tokenizer, 'src_lang'):
@@ -411,22 +420,32 @@ def translate_batch(
         raise Exception(f"Error al traducir: {str(e)}")
 
 
-def _normalize_text(text: str) -> str:
+def _normalize_text(text: str, preserve_newlines: bool = True) -> str:
     """
-    Normaliza el texto de entrada preservando saltos de línea y estructura.
+    Normaliza el texto de entrada.
     
-    Preserva URLs, emails, números y saltos de línea.
+    Args:
+        text: Texto a normalizar
+        preserve_newlines: Si True, preserva TODOS los saltos de línea.
+                          Si False, usa normalización legacy (limita a 2 saltos)
+    
+    Returns:
+        Texto normalizado
     """
-    # Normalizar espacios múltiples PERO preservar saltos de línea
-    # Reemplazar múltiples espacios/tabs con uno solo, pero mantener \n
-    text = re.sub(r'[ \t]+', ' ', text)  # Solo espacios y tabs, no \n
-    # Normalizar saltos de línea múltiples a máximo 2 consecutivos
-    text = re.sub(r'\n{3,}', '\n\n', text)
-    # Eliminar espacios al inicio y final de líneas
-    lines = text.split('\n')
-    lines = [line.strip() for line in lines]
-    text = '\n'.join(lines)
-    return text
+    if preserve_newlines:
+        # Usar nueva lógica que preserva TODA la estructura
+        return normalize_preserving_newlines(text)
+    else:
+        # Lógica legacy: normalizar espacios y limitar saltos de línea
+        # Normalizar espacios múltiples PERO preservar saltos de línea
+        text = re.sub(r'[ \t]+', ' ', text)  # Solo espacios y tabs, no \n
+        # Normalizar saltos de línea múltiples a máximo 2 consecutivos
+        text = re.sub(r'\n{3,}', '\n\n', text)
+        # Eliminar espacios al inicio y final de líneas
+        lines = text.split('\n')
+        lines = [line.strip() for line in lines]
+        text = '\n'.join(lines)
+        return text
 
 
 def _clean_translation(text: str) -> str:
@@ -489,6 +508,46 @@ def is_mostly_latin(text: str) -> bool:
         return False
     
     return True
+
+
+def translate_text_preserving_structure(
+    text: str,
+    direction: str = "es-da",
+    max_new_tokens: Optional[int] = None,
+    formal: bool = False,
+    strict_max: bool = False
+) -> str:
+    """
+    Traduce un texto preservando TODA su estructura de saltos de línea.
+    
+    Divide el texto por bloques de párrafos (separados por \\n\\n+) y traduce
+    cada bloque independientemente, luego reensambla usando los separadores originales.
+    
+    Args:
+        text: Texto a traducir
+        direction: Dirección de traducción ("es-da" o "da-es")
+        max_new_tokens: Máximo de tokens por bloque (None = auto)
+        formal: Aplicar estilo formal
+        strict_max: No elevar max_new_tokens automáticamente
+        
+    Returns:
+        Texto traducido con estructura preservada
+    """
+    def translate_block(block: str) -> str:
+        """Función interna para traducir un bloque individual."""
+        result = translate_batch(
+            [block],
+            direction=direction,
+            max_new_tokens=max_new_tokens,
+            use_cache=True,
+            formal=formal,
+            strict_max=strict_max,
+            preserve_newlines=True
+        )
+        return result[0] if result else block
+    
+    # Usar utilidad de preservación de estructura
+    return translate_preserving_structure(text, translate_block)
 
 
 # Nota: get_model_info() ahora está en ModelManager.health() (app/startup.py)

@@ -21,11 +21,12 @@ from app.schemas import (
     TranslateHTMLRequest,
     TranslateHTMLResponse
 )
-from app.inference import translate_batch
+from app.inference import translate_batch, translate_text_preserving_structure
 from app.glossary import apply_glossary_pre, apply_glossary_post
 from app.segment import split_text_for_email, split_html_preserving_structure, rehydrate_html
 from app.cache import translation_cache
 from app.utils_html import sanitize_html
+from app.utils_text import looks_like_html
 
 
 # Configuración de logging
@@ -296,6 +297,67 @@ async def translate(request: TranslateRequest):
                 detail="El campo 'text' no puede estar vacío"
             )
         
+        # Resolver max_new_tokens ANTES de cualquier procesamiento
+        resolved_max_new_tokens = resolve_max_new_tokens(
+            request.max_new_tokens, 
+            texts_to_translate
+        )
+        
+        # Debug logging para investigar truncado
+        logger.info(f"🔍 DEBUG - request.max_new_tokens: {request.max_new_tokens}")
+        logger.info(f"🔍 DEBUG - resolved_max_new_tokens: {resolved_max_new_tokens}")
+        logger.info(f"🔍 DEBUG - strict_max: {request.strict_max}")
+        
+        # Si preserve_newlines=True y es texto único (no batch), usar ruta de preservación
+        if request.preserve_newlines and is_single_text:
+            text_to_translate = texts_to_translate[0]
+            
+            # Verificar si parece HTML
+            if looks_like_html(text_to_translate):
+                # Delegar al endpoint HTML (más abajo hay lógica similar)
+                # Por ahora, usar la ruta tradicional de HTML
+                logger.info("Detectado HTML en texto plano, usando procesamiento HTML")
+                # Continuar con segmentación tradicional
+                pass
+            else:
+                # TEXTO PLANO con preserve_newlines: usar nueva ruta
+                logger.info(f"Usando traducción con preservación de estructura (preserve_newlines=True)")
+                
+                # Aplicar glosario pre-traducción si existe
+                if request.glossary:
+                    text_to_translate = apply_glossary_pre(text_to_translate, request.glossary)
+                
+                # Traducir preservando estructura
+                translated = translate_text_preserving_structure(
+                    text_to_translate,
+                    direction=request.direction,
+                    max_new_tokens=resolved_max_new_tokens,
+                    formal=request.formal or settings.FORMAL_DA,
+                    strict_max=request.strict_max
+                )
+                
+                # Aplicar glosario post-traducción si existe
+                if request.glossary:
+                    translated = apply_glossary_post(translated, request.glossary)
+                
+                # Construir respuesta directamente
+                elapsed_ms = int((time.time() - start_time) * 1000)
+                logger.info(f"✓ Traducción completada con preservación: {elapsed_ms}ms")
+                
+                if request.direction == "es-da":
+                    source_lang, target_lang = "spa_Latn", "dan_Latn"
+                else:
+                    source_lang, target_lang = "dan_Latn", "spa_Latn"
+                
+                return TranslateResponse(
+                    provider="nllb-ct2-int8",
+                    direction=request.direction,
+                    source=source_lang,
+                    target=target_lang,
+                    translations=[translated]
+                )
+        
+        # Ruta tradicional: segmentación y batch
         # Segmentar textos largos automáticamente SOLO si es necesario
         all_segments = []
         segment_map = []  # Para reconstruir después
@@ -323,17 +385,6 @@ async def translate(request: TranslateRequest):
                 for seg in all_segments
             ]
         
-        # Resolver max_new_tokens: usar cálculo adaptativo si no se especifica
-        resolved_max_new_tokens = resolve_max_new_tokens(
-            request.max_new_tokens, 
-            all_segments
-        )
-        
-        # Debug logging para investigar truncado
-        logger.info(f"🔍 DEBUG - request.max_new_tokens: {request.max_new_tokens}")
-        logger.info(f"🔍 DEBUG - resolved_max_new_tokens: {resolved_max_new_tokens}")
-        logger.info(f"🔍 DEBUG - strict_max: {request.strict_max}")
-        
         # Traducir con caché y dirección
         if not settings.LOG_TRANSLATIONS:
             logger.info(f"Traduciendo {len(all_segments)} segmento(s) [{request.direction}]...")
@@ -344,7 +395,8 @@ async def translate(request: TranslateRequest):
             max_new_tokens=resolved_max_new_tokens,
             use_cache=True,
             formal=request.formal or settings.FORMAL_DA,
-            strict_max=request.strict_max
+            strict_max=request.strict_max,
+            preserve_newlines=request.preserve_newlines
         )
         
         # Aplicar glosario post-traducción si existe
@@ -502,7 +554,8 @@ async def translate_html_endpoint(request: TranslateHTMLRequest):
             max_new_tokens=resolved_max_new_tokens,
             use_cache=True,
             formal=request.formal or settings.FORMAL_DA,
-            strict_max=request.strict_max
+            strict_max=request.strict_max,
+            preserve_newlines=request.preserve_newlines
         )
         
         # Aplicar glosario post-traducción si existe

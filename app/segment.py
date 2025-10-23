@@ -4,8 +4,9 @@ Segmentación de texto y HTML para traducción de correos electrónicos.
 Divide textos largos en segmentos manejables preservando contexto y estructura.
 """
 import re
-from typing import List, Dict
+from typing import List, Dict, Callable
 from html.parser import HTMLParser
+from bs4 import BeautifulSoup, NavigableString, Tag
 
 
 def split_text_for_email(text: str, max_segment_chars: int = 600) -> List[str]:
@@ -135,15 +136,26 @@ class HTMLBlockExtractor(HTMLParser):
             })
     
     def handle_data(self, data):
-        """Maneja texto."""
-        if data.strip():
+        """Maneja texto.
+        
+        Importante: NO eliminar espacios en blanco ni saltos de línea aquí.
+        La preservación exacta del formato es crítica.
+        """
+        # Solo acumular si hay contenido (pero preservar espacios/\n)
+        if data:
             self.current_text.append(data)
     
     def _flush_text(self):
-        """Guarda el texto acumulado como bloque."""
+        """Guarda el texto acumulado como bloque.
+        
+        IMPORTANTE: Preserva espacios/saltos de línea en el texto original.
+        Solo hace strip() para evitar bloques completamente vacíos.
+        """
         if self.current_text:
-            text = ''.join(self.current_text).strip()
-            if text:
+            text = ''.join(self.current_text)
+            # Solo guardar si hay contenido real (no solo whitespace)
+            if text.strip():
+                # Guardar texto SIN strip para preservar estructura
                 self.blocks.append({
                     'type': 'text',
                     'content': text,
@@ -240,4 +252,61 @@ def rehydrate_html(blocks: List[Dict], translations: List[str]) -> str:
                 html_parts.append(f'<{tag}>')
     
     return ''.join(html_parts)
+
+
+def translate_html_preserving_structure(
+    html: str,
+    translate_fn: Callable[[str], str]
+) -> str:
+    """
+    Traduce HTML preservando TODA la estructura: etiquetas, <br>, <p>, etc.
+    
+    Usa BeautifulSoup para navegar el DOM y solo traduce nodos de texto,
+    dejando todas las etiquetas intactas.
+    
+    Args:
+        html: HTML a traducir
+        translate_fn: Función que traduce un string de texto plano
+                     Firma: fn(text: str) -> str
+        
+    Returns:
+        HTML traducido con estructura idéntica
+    """
+    if not html or not html.strip():
+        return html
+    
+    try:
+        soup = BeautifulSoup(html, 'html.parser')
+    except Exception:
+        # Si falla el parsing, traducir como texto plano
+        return translate_fn(html)
+    
+    def translate_node(node):
+        """Recorre recursivamente y traduce solo texto."""
+        if isinstance(node, NavigableString):
+            # Es un nodo de texto: traducir si tiene contenido
+            text = str(node)
+            if text.strip():
+                # Traducir preservando espacios iniciales/finales
+                leading_space = text[:len(text) - len(text.lstrip())]
+                trailing_space = text[len(text.rstrip()):]
+                core_text = text.strip()
+                
+                if core_text:
+                    translated_core = translate_fn(core_text)
+                    node.replace_with(NavigableString(leading_space + translated_core + trailing_space))
+        
+        elif isinstance(node, Tag):
+            # Es una etiqueta: procesar hijos recursivamente
+            # NO traducir atributos (como alt, title, etc.) por ahora
+            for child in list(node.children):
+                translate_node(child)
+    
+    # Traducir todos los nodos
+    translate_node(soup)
+    
+    # Retornar HTML reconstruido
+    # usar str() en lugar de prettify() para evitar añadir saltos de línea
+    return str(soup)
+
 

@@ -46,6 +46,10 @@ class TranslateRequest(BaseModel):
         default="es-da",
         description="Dirección de traducción: es-da (Español→Danés) o da-es (Danés→Español)"
     )
+    preserve_newlines: bool = Field(
+        default=True,
+        description="Preservar saltos de línea y estructura del texto original. Si False, permite normalización tradicional"
+    )
 
     class Config:
         json_schema_extra = {
@@ -147,6 +151,10 @@ class TranslateHTMLRequest(BaseModel):
     direction: Literal["es-da", "da-es"] = Field(
         default="es-da",
         description="Dirección de traducción: es-da (Español→Danés) o da-es (Danés→Español)"
+    )
+    preserve_newlines: bool = Field(
+        default=True,
+        description="Preservar saltos de línea y estructura HTML (<br>, <p>, etc.). Si False, permite normalización tradicional"
     )
 
     class Config:
