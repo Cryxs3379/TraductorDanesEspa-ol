@@ -413,14 +413,19 @@ def translate_batch(
 
 def _normalize_text(text: str) -> str:
     """
-    Normaliza el texto de entrada: espacios, saltos de línea, etc.
+    Normaliza el texto de entrada preservando saltos de línea y estructura.
     
-    Preserva URLs, emails y números.
+    Preserva URLs, emails, números y saltos de línea.
     """
-    # Normalizar espacios múltiples
-    text = re.sub(r'\s+', ' ', text)
-    # Eliminar espacios al inicio y final
-    text = text.strip()
+    # Normalizar espacios múltiples PERO preservar saltos de línea
+    # Reemplazar múltiples espacios/tabs con uno solo, pero mantener \n
+    text = re.sub(r'[ \t]+', ' ', text)  # Solo espacios y tabs, no \n
+    # Normalizar saltos de línea múltiples a máximo 2 consecutivos
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    # Eliminar espacios al inicio y final de líneas
+    lines = text.split('\n')
+    lines = [line.strip() for line in lines]
+    text = '\n'.join(lines)
     return text
 
 
